@@ -3,10 +3,10 @@ from torch import nn
 
 
 class ACRNN(nn.Module):
-    def __init__(self, reduce: int, k: int):
+    def __init__(self, reduce: int, k: int, num_channels: int = 32, num_timepoints: int = 384):
         super().__init__()
-        self.C = 32
-        self.W = 384
+        self.C = num_channels
+        self.W = num_timepoints
         self.ratio = reduce
         self.k = k
         self.kernel_height = self.C
@@ -17,6 +17,11 @@ class ACRNN(nn.Module):
         self.hidden = 64
         self.hidden_attention = 512
         self.num_labels = 2
+
+        # Compute LSTM input size dynamically from W and pooling params
+        width_after_conv = self.W - self.kernel_width + 1
+        width_after_pool = (width_after_conv - self.pooling_width) // self.pooling_stride + 1
+        self._lstm_input_size = self.k * width_after_pool
 
         self._build_channel_wise()
         self._build_cnn()
@@ -49,7 +54,7 @@ class ACRNN(nn.Module):
 
     def _build_lstm(self) -> None:
         self.lstm = nn.LSTM(
-            input_size=self.k * 28,
+            input_size=self._lstm_input_size,
             hidden_size=self.hidden,
             num_layers=2,
             batch_first=True,
