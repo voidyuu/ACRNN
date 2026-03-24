@@ -39,7 +39,7 @@ def train_model(
             optimizer.step()
             epoch_loss += loss.item() * xb.size(0)
 
-        avg_epoch_loss = epoch_loss / len(train_loader.dataset)
+        avg_epoch_loss = epoch_loss / len(train_loader)
         if (epoch + 1) % 100 == 0:
             print(f"Epoch {epoch + 1} average loss: {avg_epoch_loss}")
         if avg_epoch_loss < best_loss:
@@ -47,6 +47,7 @@ def train_model(
             best_state_dict = deepcopy(model.state_dict())
 
     return best_state_dict
+
 
 
 def evaluate_model(model: ACRNN, test_loader: DataLoader, device: torch.device) -> float:

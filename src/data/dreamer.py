@@ -1,20 +1,3 @@
-"""DREAMER EEG dataset loaders from HuggingFace.
-
-Datasets:
-  monster-monash/DREAMERA  — arousal labels
-  monster-monash/DREAMERV  — valence labels
-
-Each sample:
-  X : float32 tensor of shape (14, 256)  — 14 EEG channels × 256 timepoints
-  y : long tensor in {0, 1}              — binarised label (original 1/2 shifted to 0/1)
-
-Available configs:
-  "full"     — entire dataset as a single train split
-  "fold_0"   — participant-based cross-validation fold 0  (train + test)
-  ...
-  "fold_4"   — participant-based cross-validation fold 4  (train + test)
-"""
-
 from __future__ import annotations
 
 import torch
