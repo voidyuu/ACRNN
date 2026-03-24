@@ -7,20 +7,13 @@ import torch
 from sklearn.model_selection import KFold
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
-
+from utils import resolve_device
 from .model import ACRNN
 
 LABEL_INDEX = {
     "valence": 0,
     "arousal": 1,
 }
-
-
-def resolve_device(device: str | None = None) -> torch.device:
-    if device:
-        return torch.device(device)
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 def train_model(
     model: ACRNN,
