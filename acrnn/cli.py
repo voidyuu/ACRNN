@@ -1,10 +1,6 @@
 import argparse
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-from acrnn.trainer import cross_validate_model
+from .trainer import cross_validate_model
 
 
 def parse_args() -> argparse.Namespace:
@@ -12,6 +8,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--target",
         choices=["valence", "arousal"],
+        required=True,
         help="Emotion dimension to classify",
     )
     parser.add_argument(
@@ -59,8 +56,4 @@ def main() -> None:
         num_workers=args.num_workers,
     )
 
-    print(f"\nFinal result — {args.target}: {mean:.4f} ± {std:.4f}")
-
-
-if __name__ == "__main__":
-    main()
+    print(f"\nFinal result - {args.target}: {mean:.4f} +- {std:.4f}")

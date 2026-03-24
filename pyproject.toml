@@ -15,8 +15,8 @@ dependencies = [
     "torch>=2.11.0",
 ]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+[project.scripts]
+acrnn = "acrnn.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]

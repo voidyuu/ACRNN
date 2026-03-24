@@ -4,9 +4,10 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from data import DreamerDataloader
-from utils import resolve_device
+
+from .data import DreamerDataloader
 from .model import ACRNN
+from .utils import resolve_device
 
 # DREAMER EEG: 14 channels × 256 timepoints (2 s at 128 Hz)
 _DREAMER_CHANNELS = 14
