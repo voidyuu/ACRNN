@@ -1,0 +1,1 @@
+uv run scripts/train.py --target valence --epochs 500 --batch-size 32
