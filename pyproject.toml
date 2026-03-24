@@ -9,6 +9,7 @@ description = "ACRNN reproduction for EEG-based emotion recognition"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "datasets>=3.0.0",
     "numpy>=2.4.3",
     "scikit-learn>=1.8.0",
     "torch>=2.11.0",
