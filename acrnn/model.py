@@ -2,8 +2,11 @@ import torch
 from torch import nn
 
 
+
 class ACRNN(nn.Module):
-    def __init__(self, reduce: int, k: int, num_channels: int = 32, num_timepoints: int = 384):
+    def __init__(
+        self, reduce: int, k: int, num_channels: int = 32, num_timepoints: int = 384
+    ):
         super().__init__()
         self.C = num_channels
         self.W = num_timepoints
@@ -20,7 +23,9 @@ class ACRNN(nn.Module):
 
         # Compute LSTM input size dynamically from W and pooling params
         width_after_conv = self.W - self.kernel_width + 1
-        width_after_pool = (width_after_conv - self.pooling_width) // self.pooling_stride + 1
+        width_after_pool = (
+            width_after_conv - self.pooling_width
+        ) // self.pooling_stride + 1
         self._lstm_input_size = self.k * width_after_pool
 
         self._build_channel_wise()
@@ -45,7 +50,9 @@ class ACRNN(nn.Module):
 
     def _build_cnn(self) -> None:
         self.conv = nn.Sequential(
-            nn.Conv2d(1, self.k, (self.kernel_height, self.kernel_width), self.kernel_stride),
+            nn.Conv2d(
+                1, self.k, (self.kernel_height, self.kernel_width), self.kernel_stride
+            ),
             nn.BatchNorm2d(self.k),
             nn.ELU(),
             nn.MaxPool2d((1, self.pooling_width), self.pooling_stride),
@@ -89,7 +96,9 @@ class ACRNN(nn.Module):
 
         h, _ = self.lstm(x)
         y = self.vector(h)
-        y = self.activation(torch.matmul(h, self.W1) + torch.matmul(y, self.W2) + self.b)
+        y = self.activation(
+            torch.matmul(h, self.W1) + torch.matmul(y, self.W2) + self.b
+        )
 
         z = self.self_attention(y)
         p = self.softmax2(z * h)

@@ -1,4 +1,5 @@
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from time import time
 
@@ -165,8 +166,11 @@ def cross_validate_model(
     if save_dir is not None:
         best_fold, best_acc, best_state = max(fold_results, key=lambda x: x[1])
         save_path = Path(save_dir) / target
-        save_path.mkdir(parents=True, exist_ok=True)
-        filename = save_path / f"fold{best_fold + 1}_acc{best_acc:.4f}.pt"
+        filename = (
+            save_path
+            / f"{datetime.fromtimestamp(time()).strftime('%Y-%m-%d %H:%M')}.pt"
+        )
+
         torch.save(
             {
                 "state_dict": best_state,
