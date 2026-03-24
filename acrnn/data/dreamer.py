@@ -1,50 +1,12 @@
 from __future__ import annotations
 
-import numpy as np
-import torch
-from huggingface_hub import hf_hub_download
-from torch.utils.data import DataLoader, Dataset
-
-TARGET_TO_REPO: dict[str, str] = {
-    "arousal": "monster-monash/DREAMERA",
-    "valence": "monster-monash/DREAMERV",
-}
-
-TARGET_TO_NAME: dict[str, str] = {
-    "arousal": "DREAMERA",
-    "valence": "DREAMERV",
-}
-
-VALID_FOLDS = range(5)  # fold_0 … fold_4
-
-
-class DreamerDataset(Dataset):
-
-    def __init__(self, X: np.ndarray, y: np.ndarray) -> None:
-        self._X = X
-        self._y = y
-
-    def __len__(self) -> int:
-        return len(self._y)
-
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        x = torch.tensor(self._X[idx], dtype=torch.float32)  # (14, 256)
-        # y: original labels are 1 / 2 — shift to 0 / 1 for CrossEntropyLoss
-        y = torch.tensor(int(self._y[idx]), dtype=torch.long) - 1
-        return x, y
-
-
-def _download(repo_id: str, filename: str, cache_dir: str | None) -> str:
-    return hf_hub_download(
-        repo_id=repo_id,
-        filename=filename,
-        repo_type="dataset",
-        cache_dir=cache_dir,
-    )
+from .loaders import DreamerDataset, build_dreamer_dataloaders
+from .source import load_dreamer_arrays, load_fold_indices, validate_target
+from .split import VALID_FOLDS, build_fold_split, validate_fold
 
 
 class DreamerDataloader:
-    """DataLoaders for the DREAMER EEG dataset downloaded directly from HuggingFace.
+    """DataLoaders for the DREAMER EEG dataset.
 
     Args:
         target:      ``"arousal"`` (DREAMERA) or ``"valence"`` (DREAMERV).
@@ -57,17 +19,6 @@ class DreamerDataloader:
     Attributes:
         train: DataLoader for the training split.
         test:  DataLoader for the test split, or ``None`` when *fold* is ``None``.
-
-    Example::
-
-        # Full dataset
-        dl = DreamerDataloader("valence")
-        for X, y in dl.train: ...
-
-        # Fold-based cross-validation
-        dl = DreamerDataloader("arousal", fold=2)
-        for X, y in dl.train: ...
-        for X, y in dl.test: ...
     """
 
     def __init__(
@@ -78,41 +29,19 @@ class DreamerDataloader:
         num_workers: int = 0,
         cache_dir: str | None = None,
     ) -> None:
-        if target not in TARGET_TO_REPO:
-            raise ValueError(
-                f"target must be one of {list(TARGET_TO_REPO)}, got {target!r}"
-            )
-        if fold is not None and fold not in VALID_FOLDS:
-            raise ValueError(
-                f"fold must be an integer 0–4 or None, got {fold!r}"
-            )
+        validate_target(target)
+        validate_fold(fold)
 
-        repo = TARGET_TO_REPO[target]
-        name = TARGET_TO_NAME[target]
-
-        X = np.load(_download(repo, f"{name}_X.npy", cache_dir))
-        y = np.load(_download(repo, f"{name}_y.npy", cache_dir))
-
-        if fold is None:
-            train_idx = np.arange(len(y))
-            test_idx = None
-        else:
-            fold_file = _download(repo, f"test_indices_fold_{fold}.txt", cache_dir)
-            test_idx = np.loadtxt(fold_file, dtype=int)
-            train_idx = np.delete(np.arange(len(y)), test_idx)
-
-        self.train = DataLoader(
-            DreamerDataset(X[train_idx], y[train_idx]),
+        arrays = load_dreamer_arrays(target, cache_dir=cache_dir)
+        test_idx = None if fold is None else load_fold_indices(target, fold, cache_dir=cache_dir)
+        split = build_fold_split(len(arrays.y), fold=fold, test_idx=test_idx)
+        loaders = build_dreamer_dataloaders(
+            arrays.X,
+            arrays.y,
+            split,
             batch_size=batch_size,
-            shuffle=True,
             num_workers=num_workers,
         )
 
-        self.test: DataLoader | None = None
-        if test_idx is not None:
-            self.test = DataLoader(
-                DreamerDataset(X[test_idx], y[test_idx]),
-                batch_size=batch_size,
-                shuffle=False,
-                num_workers=num_workers,
-            )
+        self.train = loaders.train
+        self.test = loaders.test

@@ -5,14 +5,13 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from .data import DreamerDataloader
+from .data import DreamerDataloader, VALID_FOLDS
 from .model import ACRNN
 from .utils import resolve_device
 
 # DREAMER EEG: 14 channels × 256 timepoints (2 s at 128 Hz)
 _DREAMER_CHANNELS = 14
 _DREAMER_TIMEPOINTS = 256
-_NUM_FOLDS = 5  # fold_0 … fold_4
 
 VALID_TARGETS = {"valence", "arousal"}
 
@@ -80,9 +79,10 @@ def cross_validate_model(
 
     training_device = resolve_device(device)
     all_fold_acc = []
+    num_folds = len(VALID_FOLDS)
 
-    for fold in range(_NUM_FOLDS):
-        print(f"\n========== Fold {fold + 1}/{_NUM_FOLDS} ({target}) ==========")
+    for fold in VALID_FOLDS:
+        print(f"\n========== Fold {fold + 1}/{num_folds} ({target}) ==========")
 
         dl = DreamerDataloader(
             target,
@@ -109,5 +109,5 @@ def cross_validate_model(
 
     overall_mean = float(np.mean(all_fold_acc))
     overall_std = float(np.std(all_fold_acc))
-    print(f"\n=== {_NUM_FOLDS}-Fold CV Accuracy ({target}): {overall_mean:.4f} ± {overall_std:.4f} ===")
+    print(f"\n=== {num_folds}-Fold CV Accuracy ({target}): {overall_mean:.4f} ± {overall_std:.4f} ===")
     return overall_mean, overall_std
