@@ -1,4 +1,5 @@
 from copy import deepcopy
+from pathlib import Path
 from time import time
 
 import numpy as np
@@ -6,7 +7,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from .data import DreamerDataloader, VALID_FOLDS
+from .data import VALID_FOLDS, DreamerDataloader
 from .model import ACRNN
 from .utils import resolve_device
 
@@ -74,7 +75,9 @@ def train_model(
     return best_state_dict
 
 
-def evaluate_model(model: ACRNN, test_loader: DataLoader, device: torch.device) -> float:
+def evaluate_model(
+    model: ACRNN, test_loader: DataLoader, device: torch.device
+) -> float:
     model.eval()
     all_preds, all_targets = [], []
 
@@ -98,17 +101,21 @@ def cross_validate_model(
     batch_size: int = 32,
     num_workers: int = 0,
     log_every: int = 10,
+    save_dir: str | None = "checkpoints",
 ) -> tuple[float, float]:
     if target not in VALID_TARGETS:
         raise ValueError(f"target must be one of {VALID_TARGETS}, got {target!r}")
 
     training_device = resolve_device(device)
-    all_fold_acc = []
+    all_fold_acc: list[float] = []
+    fold_results: list[tuple[int, float, dict[str, torch.Tensor]]] = []
     num_folds = len(VALID_FOLDS)
 
     for fold in VALID_FOLDS:
         print(f"\n{'=' * 52}")
-        print(f"  Fold {fold + 1}/{num_folds}  |  target: {target}  |  device: {training_device}")
+        print(
+            f"  Fold {fold + 1}/{num_folds}  |  target: {target}  |  device: {training_device}"
+        )
         print(f"{'=' * 52}")
 
         dl = DreamerDataloader(
@@ -145,6 +152,7 @@ def cross_validate_model(
         print(f"  Fold {fold + 1} Test Accuracy: {acc * 100:.2f}%")
 
         all_fold_acc.append(acc)
+        fold_results.append((fold, acc, best_state))
 
     overall_mean = float(np.mean(all_fold_acc))
     overall_std = float(np.std(all_fold_acc))
@@ -153,5 +161,24 @@ def cross_validate_model(
     print(f"  {num_folds}-Fold CV  |  {target}")
     print(f"  Accuracy: {overall_mean * 100:.2f}% ± {overall_std * 100:.2f}%")
     print(f"{'=' * 52}")
+
+    if save_dir is not None:
+        best_fold, best_acc, best_state = max(fold_results, key=lambda x: x[1])
+        save_path = Path(save_dir) / target
+        save_path.mkdir(parents=True, exist_ok=True)
+        filename = save_path / f"fold{best_fold + 1}_acc{best_acc:.4f}.pt"
+        torch.save(
+            {
+                "state_dict": best_state,
+                "fold": best_fold,
+                "test_acc": best_acc,
+                "target": target,
+                "epochs": epochs,
+            },
+            filename,
+        )
+        print(
+            f"\n  Best weights (fold {best_fold + 1}, acc {best_acc * 100:.2f}%) saved → {filename}"
+        )
 
     return overall_mean, overall_std

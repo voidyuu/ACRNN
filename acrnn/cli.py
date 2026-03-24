@@ -4,7 +4,9 @@ from .trainer import cross_validate_model
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train ACRNN on the DREAMER EEG dataset")
+    parser = argparse.ArgumentParser(
+        description="Train ACRNN on the DREAMER EEG dataset"
+    )
     parser.add_argument(
         "--target",
         choices=["valence", "arousal"],
@@ -41,6 +43,12 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="Print metrics every N epochs (default: 10)",
     )
+    parser.add_argument(
+        "--save-dir",
+        type=str,
+        default="checkpoints",
+        help="Root directory for saving weights; a sub-folder named after the target is created automatically, e.g. outputs/valence/ (default: checkpoints, set to empty string to disable)",
+    )
     return parser.parse_args()
 
 
@@ -53,6 +61,7 @@ def main() -> None:
     print(f"Workers  : {args.num_workers}")
     print(f"Device   : {args.device or 'auto'}")
     print(f"Log every: {args.log_every} epochs")
+    print(f"Save dir : {args.save_dir or '(disabled)'}")
     print()
 
     mean, std = cross_validate_model(
@@ -62,6 +71,7 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         log_every=args.log_every,
+        save_dir=args.save_dir or None,
     )
 
     print(f"\nFinal result - {args.target}: {mean:.4f} +- {std:.4f}")
