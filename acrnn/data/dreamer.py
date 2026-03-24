@@ -59,8 +59,8 @@ def load_dreamer_test_indices(
 
 
 def _dreamer_label_transform(label: np.generic | int | float) -> int:
-    # DREAMER labels are stored as 1 / 2, while CrossEntropyLoss expects 0 / 1.
-    return int(label) - 1
+    # DREAMER labels are already stored as 0 / 1, compatible with CrossEntropyLoss.
+    return int(label)
 
 
 class DreamerDataset(ArrayDataset):

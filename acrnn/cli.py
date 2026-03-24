@@ -35,6 +35,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Device override, e.g. 'cpu', 'cuda', 'mps' (default: auto-detect)",
     )
+    parser.add_argument(
+        "--log-every",
+        type=int,
+        default=10,
+        help="Print metrics every N epochs (default: 10)",
+    )
     return parser.parse_args()
 
 
@@ -46,6 +52,7 @@ def main() -> None:
     print(f"Batch    : {args.batch_size}")
     print(f"Workers  : {args.num_workers}")
     print(f"Device   : {args.device or 'auto'}")
+    print(f"Log every: {args.log_every} epochs")
     print()
 
     mean, std = cross_validate_model(
@@ -54,6 +61,7 @@ def main() -> None:
         epochs=args.epochs,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        log_every=args.log_every,
     )
 
     print(f"\nFinal result - {args.target}: {mean:.4f} +- {std:.4f}")

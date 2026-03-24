@@ -1,4 +1,5 @@
 from copy import deepcopy
+from time import time
 
 import numpy as np
 import torch
@@ -21,15 +22,22 @@ def train_model(
     train_loader: DataLoader,
     device: torch.device,
     epochs: int = 500,
+    log_every: int = 10,
 ) -> dict[str, torch.Tensor]:
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     best_loss = float("inf")
     best_state_dict = deepcopy(model.state_dict())
 
+    epoch_w = len(str(epochs))
+    dataset_size = len(train_loader.dataset)  # type: ignore[arg-type]
+
+    t_start = time()
+
     for epoch in range(epochs):
         model.train()
         epoch_loss = 0.0
+        correct = 0
 
         for xb, yb in train_loader:
             xb, yb = xb.to(device), yb.to(device)
@@ -38,14 +46,30 @@ def train_model(
             loss = criterion(output, yb)
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item() * xb.size(0)
 
-        avg_epoch_loss = epoch_loss / len(train_loader.dataset)  # type: ignore[arg-type]
-        if (epoch + 1) % 100 == 0:
-            print(f"Epoch {epoch + 1} average loss: {avg_epoch_loss:.4f}")
-        if avg_epoch_loss < best_loss:
-            best_loss = avg_epoch_loss
+            epoch_loss += loss.item() * xb.size(0)
+            preds = torch.argmax(output, dim=1)
+            correct += (preds == yb).sum().item()
+
+        avg_loss = epoch_loss / dataset_size
+        train_acc = correct / dataset_size
+
+        is_best = avg_loss < best_loss
+        if is_best:
+            best_loss = avg_loss
             best_state_dict = deepcopy(model.state_dict())
+
+        if (epoch + 1) % log_every == 0:
+            elapsed = time() - t_start
+            best_mark = "  ← best" if is_best else ""
+            print(
+                f"  Epoch {epoch + 1:{epoch_w}d}/{epochs}"
+                f" | Loss: {avg_loss:.4f}"
+                f" | Train Acc: {train_acc * 100:5.1f}%"
+                f" | Best Loss: {best_loss:.4f}"
+                f" | Elapsed: {elapsed:6.1f}s"
+                f"{best_mark}"
+            )
 
     return best_state_dict
 
@@ -73,6 +97,7 @@ def cross_validate_model(
     epochs: int = 500,
     batch_size: int = 32,
     num_workers: int = 0,
+    log_every: int = 10,
 ) -> tuple[float, float]:
     if target not in VALID_TARGETS:
         raise ValueError(f"target must be one of {VALID_TARGETS}, got {target!r}")
@@ -82,7 +107,9 @@ def cross_validate_model(
     num_folds = len(VALID_FOLDS)
 
     for fold in VALID_FOLDS:
-        print(f"\n========== Fold {fold + 1}/{num_folds} ({target}) ==========")
+        print(f"\n{'=' * 52}")
+        print(f"  Fold {fold + 1}/{num_folds}  |  target: {target}  |  device: {training_device}")
+        print(f"{'=' * 52}")
 
         dl = DreamerDataloader(
             target,
@@ -91,6 +118,9 @@ def cross_validate_model(
             num_workers=num_workers,
         )
 
+        train_size = len(dl.train.dataset)  # type: ignore[arg-type]
+        print(f"  Train samples: {train_size}")
+
         model = ACRNN(
             reduce=2,
             k=40,
@@ -98,16 +128,30 @@ def cross_validate_model(
             num_timepoints=_DREAMER_TIMEPOINTS,
         ).to(training_device)
 
-        best_state = train_model(model, dl.train, training_device, epochs=epochs)
+        best_state = train_model(
+            model,
+            dl.train,
+            training_device,
+            epochs=epochs,
+            log_every=log_every,
+        )
         model.load_state_dict(best_state)
 
         assert dl.test is not None
+        test_size = len(dl.test.dataset)  # type: ignore[arg-type]
         acc = evaluate_model(model, dl.test, training_device)
-        print(f"Fold {fold + 1} accuracy: {acc:.4f}")
-        print("=" * 50)
+
+        print(f"\n  Test samples : {test_size}")
+        print(f"  Fold {fold + 1} Test Accuracy: {acc * 100:.2f}%")
+
         all_fold_acc.append(acc)
 
     overall_mean = float(np.mean(all_fold_acc))
     overall_std = float(np.std(all_fold_acc))
-    print(f"\n=== {num_folds}-Fold CV Accuracy ({target}): {overall_mean:.4f} ± {overall_std:.4f} ===")
+
+    print(f"\n{'=' * 52}")
+    print(f"  {num_folds}-Fold CV  |  {target}")
+    print(f"  Accuracy: {overall_mean * 100:.2f}% ± {overall_std * 100:.2f}%")
+    print(f"{'=' * 52}")
+
     return overall_mean, overall_std
