@@ -1,5 +1,5 @@
-from .dreamer import DreamerDataloader
-from .loaders import DreamerDataset
-from .split import VALID_FOLDS
+from .dreamer import DreamerDataloader, DreamerDataset, VALID_FOLDS
+from .loaders import ArrayDataset
+from .split import DataSplit
 
-__all__ = ["DreamerDataset", "DreamerDataloader", "VALID_FOLDS"]
+__all__ = ["ArrayDataset", "DataSplit", "DreamerDataset", "DreamerDataloader", "VALID_FOLDS"]
