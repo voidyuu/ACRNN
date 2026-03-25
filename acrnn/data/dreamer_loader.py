@@ -159,7 +159,7 @@ class DreamerDataloader:
     def __init__(
         self,
         target: str,
-        mode: str = "subject_independent",
+        mode: str = "subject_dependent",
         fold: int = 0,
         subject_id: int | None = None,
         n_folds: int = 10,
