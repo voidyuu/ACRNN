@@ -242,10 +242,10 @@ if [ "$USE_FAST_PRESET" -eq 1 ]; then
     )
 else
     EXTRA_ARGS+=(
-        --epochs 200
-        --batch-size 10
+        --epochs 500
+        --batch-size 256
         --patience 20
-        --num-workers 4
+        --num-workers 8
     )
 fi
 
