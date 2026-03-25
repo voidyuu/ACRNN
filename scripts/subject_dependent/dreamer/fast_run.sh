@@ -7,4 +7,5 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     --dataset dreamer \
     --mode subject_dependent \
     --target valence,arousal,dominance \
+    --fast \
     "$@"
