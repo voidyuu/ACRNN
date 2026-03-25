@@ -6,7 +6,7 @@ from typing import Callable
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
 
-from ..config import DEAP_CACHE_DIR, DEAP_TARGETS
+from ..config import DEAP_CACHE_DIR, DEAP_TARGETS, get_default_threshold
 from .loaders import LoaderBundle, build_dataloaders
 from .split import DataSplit, build_kfold_splits
 
@@ -69,13 +69,14 @@ def load_deap_arrays(
     target: str,
     subject_ids: list[int] | None = None,
     cache_dir: str | Path = DEAP_CACHE_DIR,
-    threshold: float = 5.0,
+    threshold: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     if target not in VALID_TARGETS:
         raise ValueError(
             f"target must be one of {sorted(VALID_TARGETS)}, got {target!r}"
         )
 
+    threshold = get_default_threshold("deap", target) if threshold is None else threshold
     cache_dir = Path(cache_dir)
     ids: list[int] = subject_ids if subject_ids is not None else VALID_SUBJECTS
 
@@ -117,7 +118,7 @@ class DeapDataloader:
         fold: int = 0,
         subject_id: int | None = None,
         n_folds: int = 10,
-        threshold: float = 5.0,
+        threshold: float | None = None,
         cache_dir: str | Path = DEAP_CACHE_DIR,
         batch_size: int = 32,
         num_workers: int = 0,
@@ -134,6 +135,7 @@ class DeapDataloader:
                 f"got {mode!r}"
             )
 
+        threshold = get_default_threshold("deap", target) if threshold is None else threshold
         cache_dir = Path(cache_dir)
 
         # ── Build split depending on evaluation mode ──────────────────────────

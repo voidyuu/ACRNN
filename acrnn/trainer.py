@@ -13,7 +13,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from .config import VALID_DATASETS
+from .config import VALID_DATASETS, get_default_threshold
 from .data import (
     DEAP_VALID_FOLDS_INDEPENDENT,
     DEAP_VALID_SUBJECTS,
@@ -37,7 +37,6 @@ class DatasetConfig:
     valid_targets: set[str]
     valid_subjects: list[int]
     independent_folds: list[int]
-    default_threshold: float
 
 
 _DATASET_CONFIGS: dict[str, DatasetConfig] = {
@@ -47,7 +46,6 @@ _DATASET_CONFIGS: dict[str, DatasetConfig] = {
         valid_targets=DEAP_VALID_TARGETS,
         valid_subjects=DEAP_VALID_SUBJECTS,
         independent_folds=DEAP_VALID_FOLDS_INDEPENDENT,
-        default_threshold=5.0,
     ),
     "dreamer": DatasetConfig(
         name="dreamer",
@@ -55,7 +53,6 @@ _DATASET_CONFIGS: dict[str, DatasetConfig] = {
         valid_targets=DREAMER_VALID_TARGETS,
         valid_subjects=DREAMER_VALID_SUBJECTS,
         independent_folds=DREAMER_VALID_FOLDS_INDEPENDENT,
-        default_threshold=3.0,
     ),
 }
 
@@ -388,7 +385,7 @@ def cross_validate_model(
         )
 
     training_device = resolve_device(device)
-    threshold = config.default_threshold if threshold is None else threshold
+    threshold = get_default_threshold(dataset, target) if threshold is None else threshold
     eval_runs = _resolve_eval_runs(config, mode, subject_id, n_folds)
 
     all_run_acc: list[float] = []

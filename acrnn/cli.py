@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import argparse
 
-from .config import DEAP_TARGETS, DEFAULT_SAVE_DIR, DREAMER_TARGETS, VALID_DATASETS
+from .config import (
+    DEAP_TARGETS,
+    DEFAULT_SAVE_DIR,
+    DREAMER_TARGETS,
+    VALID_DATASETS,
+    get_default_threshold,
+)
 from .trainer import cross_validate_model
 
 _TARGET_CHOICES = sorted(set(DEAP_TARGETS) | set(DREAMER_TARGETS))
@@ -46,7 +52,7 @@ def parse_args() -> argparse.Namespace:
         "--threshold",
         type=float,
         default=None,
-        help="Binary-label threshold; defaults to 5.0 for DEAP and 4.0 for DREAMER",
+        help="Binary-label threshold; defaults to the configured dataset/target-specific value",
     )
     parser.add_argument(
         "--cache-dir",
@@ -101,13 +107,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    default_threshold = get_default_threshold(args.dataset, args.target)
 
     print(f"Dataset   : {args.dataset}")
     print(f"Target    : {args.target}")
     print(f"Mode      : {args.mode}")
     print(f"Subject   : {args.subject_id if args.subject_id is not None else 'all'}")
     print(f"Folds     : {args.n_folds}")
-    print(f"Threshold : {args.threshold if args.threshold is not None else 'dataset default'}")
+    print(
+        f"Threshold : {args.threshold if args.threshold is not None else f'default ({default_threshold})'}"
+    )
     print(f"Cache dir : {args.cache_dir or 'dataset default'}")
     print(f"Epochs    : {args.epochs}")
     print(f"Batch     : {args.batch_size}")
