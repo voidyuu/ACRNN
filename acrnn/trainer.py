@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from time import time
 from typing import Callable
@@ -191,6 +192,33 @@ def _save_subject_accuracy_plots(
 
     print("\n  Subject accuracy plot saved:")
     print(f"    Line chart: {line_path}")
+
+
+def _save_metrics(
+    dataset: str,
+    target: str,
+    mode: str,
+    save_dir: str | None,
+    overall_mean: float,
+    overall_std: float,
+    timestamp_label: str,
+) -> None:
+    if save_dir is None:
+        return
+
+    output_dir = Path(save_dir) / dataset / target / mode / "metrics"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    metrics_path = output_dir / f"{timestamp_label}_metrics.json"
+    metrics = {
+        "dataset": dataset,
+        "target": target,
+        "mode": mode,
+        "overall_mean": overall_mean,
+        "overall_std": overall_std,
+    }
+    metrics_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
+
+    print(f"  Metrics saved: {metrics_path}")
 
 
 class EarlyStopping:
@@ -420,6 +448,15 @@ def cross_validate_model(
         mode=mode,
         subject_scores=subject_scores,
         save_dir=save_dir,
+        timestamp_label=timestamp_label,
+    )
+    _save_metrics(
+        dataset=dataset,
+        target=target,
+        mode=mode,
+        save_dir=save_dir,
+        overall_mean=overall_mean,
+        overall_std=overall_std,
         timestamp_label=timestamp_label,
     )
 
