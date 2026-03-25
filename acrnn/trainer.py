@@ -55,7 +55,7 @@ _DATASET_CONFIGS: dict[str, DatasetConfig] = {
         valid_targets=DREAMER_VALID_TARGETS,
         valid_subjects=DREAMER_VALID_SUBJECTS,
         independent_folds=DREAMER_VALID_FOLDS_INDEPENDENT,
-        default_threshold=4.0,
+        default_threshold=3.0,
     ),
 }
 

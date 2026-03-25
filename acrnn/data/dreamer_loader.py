@@ -107,7 +107,7 @@ def load_dreamer_arrays(
     target: str,
     subject_ids: list[int] | None = None,
     cache_dir: str | Path = DREAMER_CACHE_DIR,
-    threshold: float = 4.0,
+    threshold: float = 3.0,
 ) -> tuple[np.ndarray, np.ndarray]:
 
     if target not in VALID_TARGETS:
@@ -158,7 +158,7 @@ class DreamerDataloader:
         fold: int = 0,
         subject_id: int | None = None,
         n_folds: int = 10,
-        threshold: float = 4.0,
+        threshold: float = 3.0,
         cache_dir: str | Path = DREAMER_CACHE_DIR,
         batch_size: int = 32,
         num_workers: int = 0,
