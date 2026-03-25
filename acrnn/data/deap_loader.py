@@ -32,12 +32,7 @@ DEAP_SFREQ: float = 128.0
 DEAP_N_CHANNELS: int = 32
 
 #: Mapping from target name to its column index in the ``y_raw`` array.
-_LABEL_COL: dict[str, int] = {
-    "valence": 0,
-    "arousal": 1,
-    "dominance": 2,
-    "liking": 3,
-}
+_LABEL_COL: dict[str, int] = {target: idx for idx, target in enumerate(DEAP_TARGETS)}
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 

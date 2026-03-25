@@ -54,11 +54,7 @@ DREAMER_CHANNEL_NAMES: list[str] = [
 ]
 
 #: Mapping from target name to its column index in the ``y_raw`` array.
-_LABEL_COL: dict[str, int] = {
-    "valence": 0,
-    "arousal": 1,
-    "dominance": 2,
-}
+_LABEL_COL: dict[str, int] = {target: idx for idx, target in enumerate(DREAMER_TARGETS)}
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
