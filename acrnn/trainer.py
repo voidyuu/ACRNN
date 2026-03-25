@@ -150,17 +150,15 @@ def _resolve_test_subject_id(
 
 
 def _save_subject_accuracy_plots(
+    output_dir: Path | None,
     dataset: str,
     target: str,
     mode: str,
     subject_scores: dict[int, list[float]],
-    save_dir: str | None,
-    timestamp_label: str,
 ) -> None:
-    if save_dir is None or not subject_scores:
+    if output_dir is None or not subject_scores:
         return
 
-    output_dir = Path(save_dir) / mode / dataset / target / timestamp_label
     output_dir.mkdir(parents=True, exist_ok=True)
 
     subject_ids = sorted(subject_scores)
@@ -186,7 +184,7 @@ def _save_subject_accuracy_plots(
     ax.set_xticklabels([str(sid) for sid in subject_ids])
     ax.grid(axis="y", linestyle="--", alpha=0.3)
     fig.tight_layout()
-    line_path = output_dir / f"{timestamp_label}_subject_accuracy_line.png"
+    line_path = output_dir / "subject_accuracy_line.png"
     fig.savefig(line_path, dpi=200)
     plt.close(fig)
 
@@ -195,20 +193,18 @@ def _save_subject_accuracy_plots(
 
 
 def _save_metrics(
+    output_dir: Path | None,
     dataset: str,
     target: str,
     mode: str,
-    save_dir: str | None,
     overall_mean: float,
     overall_std: float,
-    timestamp_label: str,
 ) -> None:
-    if save_dir is None:
+    if output_dir is None:
         return
 
-    output_dir = Path(save_dir) / mode / dataset / target / timestamp_label
     output_dir.mkdir(parents=True, exist_ok=True)
-    metrics_path = output_dir / f"{timestamp_label}_metrics.json"
+    metrics_path = output_dir / "metrics.json"
     metrics = {
         "dataset": dataset,
         "target": target,
@@ -219,6 +215,46 @@ def _save_metrics(
     metrics_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
 
     print(f"  Metrics saved: {metrics_path}")
+
+
+def _save_best_model(
+    output_dir: Path | None,
+    dataset: str,
+    target: str,
+    mode: str,
+    best_run: tuple[int | None, int, float, dict[str, torch.Tensor]] | None,
+    epochs: int,
+    batch_size: int,
+    threshold: float,
+) -> None:
+    if output_dir is None or best_run is None:
+        return
+
+    best_subject, best_fold, best_acc, best_state = best_run
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename = output_dir / "weight.pt"
+
+    torch.save(
+        {
+            "state_dict": best_state,
+            "dataset": dataset,
+            "target": target,
+            "mode": mode,
+            "subject_id": best_subject,
+            "fold": best_fold,
+            "test_acc": best_acc,
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "threshold": threshold,
+        },
+        filename,
+    )
+    subject_text = (
+        "all-subject sweep" if best_subject is None else f"subject {best_subject}"
+    )
+    print(
+        f"\n  Best weights ({subject_text}, fold {best_fold + 1}, acc {best_acc * 100:.2f}%) saved -> {filename}"
+    )
 
 
 class EarlyStopping:
@@ -436,6 +472,11 @@ def cross_validate_model(
     overall_mean = float(np.mean(all_run_acc))
     overall_std = float(np.std(all_run_acc))
     timestamp_label = make_timestamp_label()
+    output_dir = (
+        None
+        if save_dir is None
+        else Path(save_dir) / mode / dataset / target / timestamp_label
+    )
 
     print(f"\n{'=' * 60}")
     print(f"  Overall result  |  dataset: {dataset}  |  target: {target}")
@@ -443,49 +484,30 @@ def cross_validate_model(
     print(f"{'=' * 60}")
 
     _save_subject_accuracy_plots(
+        output_dir=output_dir,
         dataset=dataset,
         target=target,
         mode=mode,
         subject_scores=subject_scores,
-        save_dir=save_dir,
-        timestamp_label=timestamp_label,
     )
     _save_metrics(
+        output_dir=output_dir,
         dataset=dataset,
         target=target,
         mode=mode,
-        save_dir=save_dir,
         overall_mean=overall_mean,
         overall_std=overall_std,
-        timestamp_label=timestamp_label,
     )
 
-    if save_dir is not None and best_run is not None:
-        best_subject, best_fold, best_acc, best_state = best_run
-        save_path = Path(save_dir) / mode / dataset / target / timestamp_label
-        save_path.mkdir(parents=True, exist_ok=True)
-        filename = save_path / f"{timestamp_label}.pt"
-
-        torch.save(
-            {
-                "state_dict": best_state,
-                "dataset": dataset,
-                "target": target,
-                "mode": mode,
-                "subject_id": best_subject,
-                "fold": best_fold,
-                "test_acc": best_acc,
-                "epochs": epochs,
-                "batch_size": batch_size,
-                "threshold": threshold,
-            },
-            filename,
-        )
-        subject_text = (
-            "all-subject sweep" if best_subject is None else f"subject {best_subject}"
-        )
-        print(
-            f"\n  Best weights ({subject_text}, fold {best_fold + 1}, acc {best_acc * 100:.2f}%) saved -> {filename}"
-        )
+    _save_best_model(
+        output_dir=output_dir,
+        dataset=dataset,
+        target=target,
+        mode=mode,
+        best_run=best_run,
+        epochs=epochs,
+        batch_size=batch_size,
+        threshold=threshold,
+    )
 
     return overall_mean, overall_std
