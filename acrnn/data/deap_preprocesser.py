@@ -7,7 +7,14 @@ from pathlib import Path
 
 import numpy as np
 
-from .preprocess_utils import compute_baseline_template, remove_baseline_template
+from .preprocess_utils import (
+    combine_windowed_parts,
+    compute_baseline_template,
+    remove_baseline_template,
+    repeat_labels,
+    samples_for_duration,
+    segment_signal,
+)
 
 # MNE is listed as a project dependency; import lazily inside the
 # filter branch so the rest of the module works even without it.
@@ -48,25 +55,12 @@ def _n_baseline(
     sfreq: float = DEAP_SFREQ, baseline_secs: float = DEAP_BASELINE_SECS
 ) -> int:
     """Return the number of baseline samples to discard."""
-    return round(baseline_secs * sfreq)
+    return samples_for_duration(baseline_secs, sfreq)
 
 
 def _n_window(window_secs: float, sfreq: float = DEAP_SFREQ) -> int:
     """Return the number of samples per window."""
-    return round(window_secs * sfreq)
-
-
-def _segment_trial(
-    trial: np.ndarray,
-    window_samples: int,
-) -> np.ndarray:
-    n_channels, n_times = trial.shape
-    n_windows = n_times // window_samples
-    # Truncate to an exact multiple of window_samples.
-    trimmed = trial[:, : n_windows * window_samples]  # (C, n_windows × W)
-    # Reshape to (C, n_windows, W) then transpose to (n_windows, C, W).
-    reshaped = trimmed.reshape(n_channels, n_windows, window_samples)
-    return reshaped.transpose(1, 0, 2)  # → (n_windows, C, W)
+    return samples_for_duration(window_secs, sfreq)
 
 
 def _apply_bandpass(
@@ -122,7 +116,7 @@ def preprocess_subject(
     lowcut: float = 4.0,
     highcut: float = 45.0,
 ) -> tuple[np.ndarray, np.ndarray]:
-    
+
     # ── 1. Load pickle ────────────────────────────────────────────────────────
     with open(dat_path, "rb") as fh:
         subject = pickle.load(fh, encoding="latin1")
@@ -131,7 +125,7 @@ def preprocess_subject(
     raw_labels: np.ndarray = subject["labels"]  # (40, 4)
 
     # ── 2. Channel selection: keep first 32 EEG channels ─────────────────────
-    eeg_data = raw_data[:, :DEAP_N_EEG_CHANNELS, :]  # (40, 32, 8064)
+    eeg_data = raw_data[:, :DEAP_N_EEG_CHANNELS, :].astype(np.float32)  # (40, 32, 8064)
     labels = raw_labels.astype(np.float32)  # (40, 4)
 
     baseline_n = _n_baseline()
@@ -140,9 +134,7 @@ def preprocess_subject(
     X_parts: list[np.ndarray] = []
     y_parts: list[np.ndarray] = []
 
-    for trial_idx in range(DEAP_N_TRIALS):
-        trial = eeg_data[trial_idx].astype(np.float32)  # (32, 8064)
-
+    for trial, label in zip(eeg_data, labels, strict=True):
         # ── 3. Baseline-template removal (paper Eq. 1–2) ────────────────────
         baseline = trial[:, :baseline_n]  # (32, 384)
         stimulus = trial[:, baseline_n:]  # (32, 7680)
@@ -154,19 +146,12 @@ def preprocess_subject(
             trial = _apply_bandpass(trial, DEAP_SFREQ, lowcut, highcut)
 
         # ── 5. Segmentation ───────────────────────────────────────────────────
-        windows = _segment_trial(trial, win_n)  # (n_windows, 32, win_n)
-
-        n_windows = len(windows)
-
-        # ── 6. Label repetition ───────────────────────────────────────────────
-        repeated_label = np.tile(labels[trial_idx], (n_windows, 1))  # (n_windows, 4)
+        windows = segment_signal(trial, win_n)  # (n_windows, 32, win_n)
 
         X_parts.append(windows)
-        y_parts.append(repeated_label)
+        y_parts.append(repeat_labels(label, len(windows)))
 
-    X = np.concatenate(X_parts, axis=0)  # (n_windows_total, 32, win_n)
-    y_raw = np.concatenate(y_parts, axis=0)  # (n_windows_total, 4)
-    return X, y_raw
+    return combine_windowed_parts(X_parts, y_parts)
 
 
 # ── Batch processing ──────────────────────────────────────────────────────────

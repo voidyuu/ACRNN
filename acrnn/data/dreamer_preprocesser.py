@@ -7,7 +7,14 @@ from pathlib import Path
 import numpy as np
 import scipy.io
 
-from .preprocess_utils import compute_baseline_template, remove_baseline_template
+from .preprocess_utils import (
+    combine_windowed_parts,
+    compute_baseline_template,
+    remove_baseline_template,
+    repeat_labels,
+    samples_for_duration,
+    segment_signal,
+)
 
 # ── Module-level logger ───────────────────────────────────────────────────────
 _LOG = logging.getLogger(__name__)
@@ -64,19 +71,7 @@ DREAMER_CHANNEL_NAMES: list[str] = [
 
 def _n_window(window_secs: float, sfreq: float = DREAMER_SFREQ) -> int:
     """Return the integer number of samples per window."""
-    return round(window_secs * sfreq)
-
-
-def _segment_trial(
-    trial: np.ndarray,
-    window_samples: int,
-) -> np.ndarray:
-
-    n_channels, n_times = trial.shape
-    n_windows = n_times // window_samples
-    trimmed = trial[:, : n_windows * window_samples]  # (C, n_win × W)
-    reshaped = trimmed.reshape(n_channels, n_windows, window_samples)
-    return reshaped.transpose(1, 0, 2)  # (n_win, C, W)
+    return samples_for_duration(window_secs, sfreq)
 
 
 # ── MATLAB struct helpers ─────────────────────────────────────────────────────
@@ -123,39 +118,34 @@ def preprocess_subject(
     scores_v = subject_struct["ScoreValence"].item().astype(np.int8)  # (18,)
     scores_a = subject_struct["ScoreArousal"].item().astype(np.int8)  # (18,)
     scores_d = subject_struct["ScoreDominance"].item().astype(np.int8)  # (18,)
+    trial_labels = np.column_stack((scores_v, scores_a, scores_d))
 
     win_n = _n_window(window_secs, sfreq)
 
     X_parts: list[np.ndarray] = []
     y_parts: list[np.ndarray] = []
 
-    for trial_idx in range(DREAMER_N_TRIALS):
+    for stimulus_raw, baseline_raw, label in zip(
+        stimuli_arr,
+        baseline_arr,
+        trial_labels,
+        strict=True,
+    ):
         # Raw arrays: time × channels → (T_v, 14) and (7808, 14)
-        stimulus = stimuli_arr[trial_idx].astype(np.float32).T  # (14, T_v)
-        baseline = baseline_arr[trial_idx].astype(np.float32).T  # (14, 7808)
+        stimulus = stimulus_raw.astype(np.float32).T  # (14, T_v)
+        baseline = baseline_raw.astype(np.float32).T  # (14, 7808)
 
         # ── 1. Baseline-template removal (paper Eq. 1–2) ────────────────────
         baseline_template = compute_baseline_template(baseline, sfreq)
         stimulus_bc = remove_baseline_template(stimulus, baseline_template, sfreq)
 
         # ── 2. Segmentation ───────────────────────────────────────────────────
-        windows = _segment_trial(stimulus_bc, win_n)  # (n_win, 14, win_n)
-
-        n_windows = len(windows)
-
-        # ── 3. Label repetition ───────────────────────────────────────────────
-        label_vec = np.array(
-            [scores_v[trial_idx], scores_a[trial_idx], scores_d[trial_idx]],
-            dtype=np.int8,
-        )  # (3,)
-        repeated_labels = np.tile(label_vec, (n_windows, 1))  # (n_win, 3)
+        windows = segment_signal(stimulus_bc, win_n)  # (n_win, 14, win_n)
 
         X_parts.append(windows)
-        y_parts.append(repeated_labels)
+        y_parts.append(repeat_labels(label, len(windows)))
 
-    X = np.concatenate(X_parts, axis=0)  # (n_total, 14, win_n)
-    y_raw = np.concatenate(y_parts, axis=0)  # (n_total, 3)
-    return X, y_raw
+    return combine_windowed_parts(X_parts, y_parts)
 
 
 # ── Batch processing ──────────────────────────────────────────────────────────
