@@ -44,6 +44,12 @@ def parse_args() -> argparse.Namespace:
         help="Print metrics every N epochs (default: 10)",
     )
     parser.add_argument(
+        "--patience",
+        type=int,
+        default=0,
+        help="Early stopping patience in epochs; set to 0 to disable (default: 0)",
+    )
+    parser.add_argument(
         "--save-dir",
         type=str,
         default="checkpoints",
@@ -61,6 +67,7 @@ def main() -> None:
     print(f"Workers  : {args.num_workers}")
     print(f"Device   : {args.device or 'auto'}")
     print(f"Log every: {args.log_every} epochs")
+    print(f"Patience : {args.patience if args.patience > 0 else 'disabled'}")
     print(f"Save dir : {args.save_dir or '(disabled)'}")
     print()
 
@@ -71,6 +78,7 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         log_every=args.log_every,
+        patience=args.patience,
         save_dir=args.save_dir or None,
     )
 

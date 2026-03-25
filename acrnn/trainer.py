@@ -19,16 +19,61 @@ _DREAMER_TIMEPOINTS = 256
 VALID_TARGETS = {"valence", "arousal"}
 
 
+class EarlyStopping:
+    """Stops training when the monitored loss stops improving.
+
+    Args:
+        patience:  Number of epochs to wait after the last improvement.
+                   Set to 0 to disable early stopping.
+        min_delta: Minimum decrease in loss to count as an improvement.
+    """
+
+    def __init__(self, patience: int = 20, min_delta: float = 0.0) -> None:
+        self.patience = patience
+        self.min_delta = min_delta
+        self._best = float("inf")
+        self._counter = 0
+
+    def step(self, loss: float) -> bool:
+        """Record *loss* for the current epoch.
+
+        Returns:
+            ``True`` if *loss* is a new best, ``False`` otherwise.
+        """
+        if loss < self._best - self.min_delta:
+            self._best = loss
+            self._counter = 0
+            return True
+        self._counter += 1
+        return False
+
+    @property
+    def should_stop(self) -> bool:
+        """``True`` when patience has been exhausted."""
+        return self.patience > 0 and self._counter >= self.patience
+
+    @property
+    def best(self) -> float:
+        """Best loss seen so far."""
+        return self._best
+
+    @property
+    def counter(self) -> int:
+        """Epochs elapsed since the last improvement."""
+        return self._counter
+
+
 def train_model(
     model: ACRNN,
     train_loader: DataLoader,
     device: torch.device,
     epochs: int = 500,
     log_every: int = 10,
+    patience: int = 20,
 ) -> dict[str, torch.Tensor]:
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    best_loss = float("inf")
+    early_stopping = EarlyStopping(patience=patience)
     best_state_dict = deepcopy(model.state_dict())
 
     epoch_w = len(str(epochs))
@@ -56,9 +101,8 @@ def train_model(
         avg_loss = epoch_loss / dataset_size
         train_acc = correct / dataset_size
 
-        is_best = avg_loss < best_loss
+        is_best = early_stopping.step(avg_loss)
         if is_best:
-            best_loss = avg_loss
             best_state_dict = deepcopy(model.state_dict())
 
         if (epoch + 1) % log_every == 0:
@@ -68,10 +112,16 @@ def train_model(
                 f"  Epoch {epoch + 1:{epoch_w}d}/{epochs}"
                 f" | Loss: {avg_loss:.4f}"
                 f" | Train Acc: {train_acc * 100:5.1f}%"
-                f" | Best Loss: {best_loss:.4f}"
+                f" | Best Loss: {early_stopping.best:.4f}"
                 f" | Elapsed: {elapsed:6.1f}s"
                 f"{best_mark}"
             )
+
+        if early_stopping.should_stop:
+            print(
+                f"  Early stopping at epoch {epoch + 1} — no improvement for {patience} epochs."
+            )
+            break
 
     return best_state_dict
 
@@ -102,6 +152,7 @@ def cross_validate_model(
     batch_size: int = 32,
     num_workers: int = 0,
     log_every: int = 10,
+    patience: int = 20,
     save_dir: str | None = "checkpoints",
 ) -> tuple[float, float]:
     if target not in VALID_TARGETS:
@@ -142,6 +193,7 @@ def cross_validate_model(
             training_device,
             epochs=epochs,
             log_every=log_every,
+            patience=patience,
         )
         model.load_state_dict(best_state)
 
