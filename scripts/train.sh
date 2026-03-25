@@ -49,12 +49,23 @@ EOF
 
 split_csv() {
     local raw="$1"
-    local -n out_ref="$2"
+    local out_var="$2"
     local item
+    local values=()
 
-    IFS=',' read -r -a out_ref <<< "$raw"
-    for item in "${!out_ref[@]}"; do
-        out_ref[$item]="${out_ref[$item]//[[:space:]]/}"
+    if ! [[ "$out_var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        echo "Invalid output variable name: $out_var" >&2
+        exit 1
+    fi
+
+    IFS=',' read -r -a values <<< "$raw"
+    for item in "${!values[@]}"; do
+        values[$item]="${values[$item]//[[:space:]]/}"
+    done
+
+    eval "$out_var=()"
+    for item in "${values[@]}"; do
+        eval "$out_var+=(\"\$item\")"
     done
 }
 
@@ -68,6 +79,22 @@ contains_value() {
         fi
     done
     return 1
+}
+
+read_lines_into_array() {
+    local out_var="$1"
+    shift
+    local line
+
+    if ! [[ "$out_var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        echo "Invalid output variable name: $out_var" >&2
+        exit 1
+    fi
+
+    eval "$out_var=()"
+    while IFS= read -r line; do
+        eval "$out_var+=(\"\$line\")"
+    done < <("$@")
 }
 
 default_cache_dir_for_dataset() {
@@ -221,21 +248,21 @@ else
 fi
 
 if [ -n "$CACHE_DIR_OVERRIDE" ]; then
-    mapfile -t _datasets_for_cache_check < <(expand_datasets)
+    read_lines_into_array _datasets_for_cache_check expand_datasets
     if [ "${#_datasets_for_cache_check[@]}" -ne 1 ]; then
         echo "--cache-dir can only be used when exactly one dataset is selected." >&2
         exit 1
     fi
 fi
 
-mapfile -t DATASETS < <(expand_datasets)
-mapfile -t MODES < <(expand_modes)
+read_lines_into_array DATASETS expand_datasets
+read_lines_into_array MODES expand_modes
 
 for dataset in "${DATASETS[@]}"; do
     cache_dir="$(resolve_cache_dir "$dataset")"
     ensure_cache_ready "$dataset" "$cache_dir"
 
-    mapfile -t TARGETS < <(expand_targets_for_dataset "$dataset")
+    read_lines_into_array TARGETS expand_targets_for_dataset "$dataset"
 
     for mode in "${MODES[@]}"; do
         for target in "${TARGETS[@]}"; do
