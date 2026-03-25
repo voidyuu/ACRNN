@@ -234,7 +234,7 @@ done
 
 if [ "$USE_FAST_PRESET" -eq 1 ]; then
     EXTRA_ARGS+=(
-        --epochs 1
+        --epochs 10
         --batch-size 10
         --patience 20
         --log-every 1

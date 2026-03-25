@@ -81,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--log-every",
         type=int,
-        default=1,
+        default=10,
         help="Print metrics every N epochs (default: 1)",
     )
     parser.add_argument(
