@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from time import time
 from typing import Callable
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import nn
@@ -24,7 +24,7 @@ from .data import (
     DreamerDataloader,
 )
 from .model import ACRNN
-from .utils import resolve_device
+from .utils import make_timestamp_label, resolve_device
 
 VALID_MODES = {"subject_dependent", "subject_independent"}
 
@@ -133,6 +133,64 @@ def _build_dataloader(
         kwargs["subject_id"] = subject_id
         kwargs["n_folds"] = n_folds
     return config.dataloader_cls(**kwargs)
+
+
+def _resolve_test_subject_id(
+    config: DatasetConfig,
+    mode: str,
+    run_subject_id: int | None,
+    fold: int,
+) -> int:
+    if mode == "subject_independent":
+        return config.valid_subjects[fold]
+    if run_subject_id is None:
+        raise ValueError("run_subject_id must be set in subject_dependent mode.")
+    return run_subject_id
+
+
+def _save_subject_accuracy_plots(
+    dataset: str,
+    target: str,
+    mode: str,
+    subject_scores: dict[int, list[float]],
+    save_dir: str | None,
+    timestamp_label: str,
+) -> None:
+    if save_dir is None or not subject_scores:
+        return
+
+    output_dir = Path(save_dir) / dataset / target / mode / "plots"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    subject_ids = sorted(subject_scores)
+    mean_scores = [float(np.mean(subject_scores[sid])) for sid in subject_ids]
+    std_scores = [float(np.std(subject_scores[sid])) for sid in subject_ids]
+
+    x = np.arange(len(subject_ids))
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax.plot(x, mean_scores, marker="o", linewidth=2, color="#F58518")
+    ax.fill_between(
+        x,
+        np.maximum(0.0, np.array(mean_scores) - np.array(std_scores)),
+        np.minimum(1.0, np.array(mean_scores) + np.array(std_scores)),
+        color="#F58518",
+        alpha=0.15,
+    )
+    ax.set_title(f"{dataset.upper()} {target} {mode} subject accuracy")
+    ax.set_xlabel("Subject")
+    ax.set_ylabel("Accuracy")
+    ax.set_ylim(0.0, 1.0)
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(sid) for sid in subject_ids])
+    ax.grid(axis="y", linestyle="--", alpha=0.3)
+    fig.tight_layout()
+    line_path = output_dir / f"{timestamp_label}_subject_accuracy_line.png"
+    fig.savefig(line_path, dpi=200)
+    plt.close(fig)
+
+    print("\n  Subject accuracy plot saved:")
+    print(f"    Line chart: {line_path}")
 
 
 class EarlyStopping:
@@ -331,17 +389,17 @@ def cross_validate_model(
         print(f"  Accuracy     : {acc * 100:.2f}%")
 
         all_run_acc.append(acc)
-        if run_subject_id is not None:
-            subject_scores.setdefault(run_subject_id, []).append(acc)
+        test_subject_id = _resolve_test_subject_id(config, mode, run_subject_id, fold)
+        subject_scores.setdefault(test_subject_id, []).append(acc)
 
         if best_run is None or acc > best_run[2]:
             best_run = (run_subject_id, fold, acc, best_state)
 
-    if mode == "subject_dependent" and subject_id is None:
+    if subject_scores and (mode == "subject_independent" or subject_id is None):
         print(f"\n{'-' * 60}")
-        print("  Per-subject 10-fold summary")
+        print("  Per-subject summary")
         print(f"{'-' * 60}")
-        for sid in config.valid_subjects:
+        for sid in sorted(subject_scores):
             scores = subject_scores[sid]
             mean = float(np.mean(scores))
             std = float(np.std(scores))
@@ -349,17 +407,27 @@ def cross_validate_model(
 
     overall_mean = float(np.mean(all_run_acc))
     overall_std = float(np.std(all_run_acc))
+    timestamp_label = make_timestamp_label()
 
     print(f"\n{'=' * 60}")
     print(f"  Overall result  |  dataset: {dataset}  |  target: {target}")
     print(f"  Accuracy: {overall_mean * 100:.2f}% +- {overall_std * 100:.2f}%")
     print(f"{'=' * 60}")
 
+    _save_subject_accuracy_plots(
+        dataset=dataset,
+        target=target,
+        mode=mode,
+        subject_scores=subject_scores,
+        save_dir=save_dir,
+        timestamp_label=timestamp_label,
+    )
+
     if save_dir is not None and best_run is not None:
         best_subject, best_fold, best_acc, best_state = best_run
         save_path = Path(save_dir) / dataset / target / mode
         save_path.mkdir(parents=True, exist_ok=True)
-        filename = save_path / f"{datetime.fromtimestamp(time()).strftime('%Y-%m-%d %H-%M')}.pt"
+        filename = save_path / f"{timestamp_label}.pt"
 
         torch.save(
             {
