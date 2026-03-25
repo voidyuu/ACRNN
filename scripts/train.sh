@@ -238,7 +238,6 @@ if [ "$USE_FAST_PRESET" -eq 1 ]; then
         --batch-size 128
         --patience 20
         --log-every 1
-        --save-dir ""
     )
 else
     EXTRA_ARGS+=(

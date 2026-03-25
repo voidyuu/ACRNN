@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import dataclass
-import json
 from pathlib import Path
 from time import time
 from typing import Callable
@@ -160,7 +160,7 @@ def _save_subject_accuracy_plots(
     if save_dir is None or not subject_scores:
         return
 
-    output_dir = Path(save_dir) / dataset / target / mode / "plots"
+    output_dir = Path(save_dir) / mode / dataset / target / timestamp_label
     output_dir.mkdir(parents=True, exist_ok=True)
 
     subject_ids = sorted(subject_scores)
@@ -206,7 +206,7 @@ def _save_metrics(
     if save_dir is None:
         return
 
-    output_dir = Path(save_dir) / dataset / target / mode / "metrics"
+    output_dir = Path(save_dir) / mode / dataset / target / timestamp_label
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = output_dir / f"{timestamp_label}_metrics.json"
     metrics = {
@@ -462,7 +462,7 @@ def cross_validate_model(
 
     if save_dir is not None and best_run is not None:
         best_subject, best_fold, best_acc, best_state = best_run
-        save_path = Path(save_dir) / dataset / target / mode
+        save_path = Path(save_dir) / mode / dataset / target / timestamp_label
         save_path.mkdir(parents=True, exist_ok=True)
         filename = save_path / f"{timestamp_label}.pt"
 
@@ -481,7 +481,9 @@ def cross_validate_model(
             },
             filename,
         )
-        subject_text = "all-subject sweep" if best_subject is None else f"subject {best_subject}"
+        subject_text = (
+            "all-subject sweep" if best_subject is None else f"subject {best_subject}"
+        )
         print(
             f"\n  Best weights ({subject_text}, fold {best_fold + 1}, acc {best_acc * 100:.2f}%) saved -> {filename}"
         )
