@@ -283,6 +283,7 @@ class EarlyStopping:
 def train_model(
     model: ACRNN,
     train_loader: DataLoader,
+    test_loader: DataLoader | None,
     device: torch.device,
     epochs: int = 200,
     log_every: int = 1,
@@ -317,6 +318,10 @@ def train_model(
 
         avg_loss = epoch_loss / dataset_size
         train_acc = correct / dataset_size
+        test_acc: float | None = None
+
+        if test_loader is not None:
+            test_acc = evaluate_model(model, test_loader, device)
 
         is_best = early_stopping.step(avg_loss)
         if is_best:
@@ -325,10 +330,14 @@ def train_model(
         if (epoch + 1) % log_every == 0:
             elapsed = time() - t_start
             best_mark = "  <- best" if is_best else ""
+            test_acc_text = (
+                f" | Test Acc: {test_acc * 100:5.1f}%" if test_acc is not None else ""
+            )
             print(
                 f"  Epoch {epoch + 1:{epoch_w}d}/{epochs}"
                 f" | Loss: {avg_loss:.4f}"
                 f" | Train Acc: {train_acc * 100:5.1f}%"
+                f"{test_acc_text}"
                 f" | Best Loss: {early_stopping.best:.4f}"
                 f" | Elapsed: {elapsed:6.1f}s"
                 f"{best_mark}"
@@ -435,6 +444,7 @@ def cross_validate_model(
         best_state = train_model(
             model,
             dl.train,
+            dl.test,
             training_device,
             epochs=epochs,
             log_every=log_every,
