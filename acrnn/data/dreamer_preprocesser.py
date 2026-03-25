@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import scipy.io
 
+from ..config import DREAMER_CACHE_DIR, DREAMER_MAT_PATH
 from .preprocess_utils import (
     combine_windowed_parts,
     compute_baseline_template,
@@ -41,11 +42,6 @@ DREAMER_N_LABEL_DIMS: int = 3
 #: Default window length (seconds).  Matches ACRNN's ``14 × 384`` input.
 DEFAULT_WINDOW_SECS: float = 3.0
 
-#: Default path to the DREAMER.mat file.
-DEFAULT_MAT_PATH: Path = Path("data/dreamer/DREAMER.mat")
-
-#: Default cache output directory.
-DEFAULT_CACHE_DIR: Path = Path("data/dreamer/cache")
 
 #: Channel names in order (informational, not used during preprocessing).
 DREAMER_CHANNEL_NAMES: list[str] = [
@@ -152,8 +148,8 @@ def preprocess_subject(
 
 
 def preprocess_all(
-    mat_path: Path = DEFAULT_MAT_PATH,
-    cache_dir: Path = DEFAULT_CACHE_DIR,
+    mat_path: Path = DREAMER_MAT_PATH,
+    cache_dir: Path = DREAMER_CACHE_DIR,
     window_secs: float = DEFAULT_WINDOW_SECS,
     overwrite: bool = False,
 ) -> None:
@@ -221,14 +217,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mat-path",
         type=Path,
-        default=DEFAULT_MAT_PATH,
+        default=DREAMER_MAT_PATH,
         metavar="PATH",
         help="Path to the DREAMER.mat file.",
     )
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=DEFAULT_CACHE_DIR,
+        default=DREAMER_CACHE_DIR,
         metavar="PATH",
         help="Output directory for preprocessed .npz cache files.",
     )

@@ -5,6 +5,7 @@ import argparse
 import mne
 import numpy as np
 
+from acrnn.config import DREAMER_CACHE_DIR
 from acrnn.data.dreamer_loader import (
     DREAMER_CHANNEL_NAMES,
     DREAMER_SFREQ,
@@ -12,7 +13,7 @@ from acrnn.data.dreamer_loader import (
     load_dreamer_arrays,
 )
 
-_DEFAULT_CACHE_DIR = "data/dreamer/cache"
+_DEFAULT_CACHE_DIR = str(DREAMER_CACHE_DIR)
 
 
 def parse_args() -> argparse.Namespace:

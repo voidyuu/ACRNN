@@ -12,6 +12,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from .config import VALID_DATASETS
 from .data import (
     DEAP_VALID_FOLDS_INDEPENDENT,
     DEAP_VALID_SUBJECTS,
@@ -25,7 +26,6 @@ from .data import (
 from .model import ACRNN
 from .utils import resolve_device
 
-VALID_DATASETS = {"deap", "dreamer"}
 VALID_MODES = {"subject_dependent", "subject_independent"}
 
 

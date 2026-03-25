@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import argparse
 
-from .data import DEAP_VALID_TARGETS, DREAMER_VALID_TARGETS
+from .config import DEAP_TARGETS, DEFAULT_SAVE_DIR, DREAMER_TARGETS, VALID_DATASETS
 from .trainer import cross_validate_model
 
-_TARGET_CHOICES = sorted(DEAP_VALID_TARGETS | DREAMER_VALID_TARGETS)
+_TARGET_CHOICES = sorted(set(DEAP_TARGETS) | set(DREAMER_TARGETS))
 
 
 def parse_args() -> argparse.Namespace:
@@ -14,7 +14,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dataset",
-        choices=["deap", "dreamer"],
+        choices=list(VALID_DATASETS),
         default="dreamer",
         help="Dataset to evaluate",
     )
@@ -93,7 +93,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--save-dir",
         type=str,
-        default="checkpoints",
+        default=str(DEFAULT_SAVE_DIR),
         help="Directory for saving best weights under dataset/target/mode subfolders",
     )
     return parser.parse_args()

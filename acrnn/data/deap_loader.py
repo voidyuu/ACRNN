@@ -6,16 +6,15 @@ from typing import Callable
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
 
+from ..config import DEAP_CACHE_DIR, DEAP_TARGETS
 from .loaders import LoaderBundle, build_dataloaders
 from .split import DataSplit, build_kfold_splits
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-#: Directory where ``deap_preprocesser.py`` writes its ``.npz`` files.
-_DEFAULT_CACHE_DIR: Path = Path("data/deap/cache")
 
 #: Valid emotion-dimension names that can be used as training targets.
-VALID_TARGETS: set[str] = {"valence", "arousal", "dominance", "liking"}
+VALID_TARGETS: set[str] = set(DEAP_TARGETS)
 
 #: All 32 subject IDs (1-indexed).
 VALID_SUBJECTS: list[int] = list(range(1, 33))
@@ -74,7 +73,7 @@ def _binarise(
 def load_deap_arrays(
     target: str,
     subject_ids: list[int] | None = None,
-    cache_dir: str | Path = _DEFAULT_CACHE_DIR,
+    cache_dir: str | Path = DEAP_CACHE_DIR,
     threshold: float = 5.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     if target not in VALID_TARGETS:
@@ -110,7 +109,6 @@ def load_deap_arrays(
 
 
 class DeapDataloader:
-
     #: DataLoader for the training partition.
     train: DataLoader
 
@@ -125,7 +123,7 @@ class DeapDataloader:
         subject_id: int | None = None,
         n_folds: int = 10,
         threshold: float = 5.0,
-        cache_dir: str | Path = _DEFAULT_CACHE_DIR,
+        cache_dir: str | Path = DEAP_CACHE_DIR,
         batch_size: int = 32,
         num_workers: int = 0,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None = None,

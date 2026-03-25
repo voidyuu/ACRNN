@@ -6,13 +6,7 @@ export HF_ENDPOINT=https://hf-mirror.com
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-DREAMER_CACHE_DIR="data/dreamer/cache"
-DEAP_CACHE_DIR="data/deap/cache"
-
-VALID_DATASETS=(deap dreamer)
 VALID_MODES=(subject_dependent subject_independent)
-DEAP_TARGETS=(valence arousal dominance liking)
-DREAMER_TARGETS=(valence arousal dominance)
 
 DATASET_SPECS=("dreamer")
 MODE_SPECS=("subject_dependent")
@@ -99,14 +93,23 @@ read_lines_into_array() {
 
 default_cache_dir_for_dataset() {
     local dataset="$1"
-    case "$dataset" in
-        deap) echo "$DEAP_CACHE_DIR" ;;
-        dreamer) echo "$DREAMER_CACHE_DIR" ;;
-        *)
-            echo "Unsupported dataset: $dataset" >&2
-            exit 1
-            ;;
-    esac
+    uv run python -c "from acrnn.config import get_default_cache_dir; print(get_default_cache_dir('$dataset'))"
+}
+
+read_config_tuple_into_array() {
+    local out_var="$1"
+    local python_expr="$2"
+    local line
+
+    if ! [[ "$out_var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        echo "Invalid output variable name: $out_var" >&2
+        exit 1
+    fi
+
+    eval "$out_var=()"
+    while IFS= read -r line; do
+        eval "$out_var+=(\"\$line\")"
+    done < <(uv run python -c "$python_expr")
 }
 
 resolve_cache_dir() {
@@ -140,11 +143,13 @@ ensure_cache_ready() {
 expand_datasets() {
     local spec
     local expanded=()
+    local valid_datasets=()
+    read_config_tuple_into_array valid_datasets "from acrnn.config import VALID_DATASETS; print(*VALID_DATASETS, sep='\\n')"
     for spec in "${DATASET_SPECS[@]}"; do
         if [ "$spec" = "all" ]; then
-            expanded+=("${VALID_DATASETS[@]}")
+            expanded+=("${valid_datasets[@]}")
         else
-            if ! contains_value "$spec" "${VALID_DATASETS[@]}"; then
+            if ! contains_value "$spec" "${valid_datasets[@]}"; then
                 echo "Invalid dataset: $spec" >&2
                 exit 1
             fi
@@ -177,10 +182,7 @@ expand_targets_for_dataset() {
     local spec
     local expanded=()
 
-    case "$dataset" in
-        deap) available_targets=("${DEAP_TARGETS[@]}") ;;
-        dreamer) available_targets=("${DREAMER_TARGETS[@]}") ;;
-    esac
+    read_config_tuple_into_array available_targets "from acrnn.config import get_valid_targets; print(*get_valid_targets('$dataset'), sep='\\n')"
 
     for spec in "${TARGET_SPECS[@]}"; do
         if [ "$spec" = "all" ]; then

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..config import DEAP_CACHE_DIR, DEAP_DATA_DIR
 from .preprocess_utils import (
     combine_windowed_parts,
     compute_baseline_template,
@@ -40,12 +41,6 @@ DEAP_N_LABEL_DIMS: int = 4
 
 #: Default window length used for segmentation (seconds).
 DEFAULT_WINDOW_SECS: float = 3.0
-
-#: Default cache directory (relative to the working directory).
-DEFAULT_CACHE_DIR: Path = Path("data/deap/cache")
-
-#: Default raw data directory.
-DEFAULT_DATA_DIR: Path = Path("data/deap")
 
 
 # ── Low-level helpers ─────────────────────────────────────────────────────────
@@ -158,8 +153,8 @@ def preprocess_subject(
 
 
 def preprocess_all(
-    data_dir: Path = DEFAULT_DATA_DIR,
-    cache_dir: Path = DEFAULT_CACHE_DIR,
+    data_dir: Path = DEAP_DATA_DIR,
+    cache_dir: Path = DEAP_CACHE_DIR,
     window_secs: float = DEFAULT_WINDOW_SECS,
     apply_filter: bool = False,
     lowcut: float = 4.0,
@@ -234,14 +229,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=DEFAULT_DATA_DIR,
+        default=DEAP_DATA_DIR,
         metavar="PATH",
         help="Directory containing raw s01.dat … s32.dat files.",
     )
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=DEFAULT_CACHE_DIR,
+        default=DEAP_CACHE_DIR,
         metavar="PATH",
         help="Output directory for preprocessed .npz cache files.",
     )

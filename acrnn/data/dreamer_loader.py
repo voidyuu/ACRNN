@@ -6,16 +6,15 @@ from typing import Callable
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
 
+from ..config import DREAMER_CACHE_DIR, DREAMER_TARGETS
 from .loaders import LoaderBundle, build_dataloaders
 from .split import DataSplit, build_kfold_splits
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-#: Default location of the per-subject ``.npz`` cache files.
-_DEFAULT_CACHE_DIR: Path = Path("data/dreamer/cache")
 
 #: Valid emotion-dimension names that can be used as training targets.
-VALID_TARGETS: set[str] = {"valence", "arousal", "dominance"}
+VALID_TARGETS: set[str] = set(DREAMER_TARGETS)
 
 #: All 23 subject IDs (1-indexed).
 VALID_SUBJECTS: list[int] = list(range(1, 24))
@@ -111,7 +110,7 @@ def _binarise(
 def load_dreamer_arrays(
     target: str,
     subject_ids: list[int] | None = None,
-    cache_dir: str | Path = _DEFAULT_CACHE_DIR,
+    cache_dir: str | Path = DREAMER_CACHE_DIR,
     threshold: float = 4.0,
 ) -> tuple[np.ndarray, np.ndarray]:
 
@@ -164,7 +163,7 @@ class DreamerDataloader:
         subject_id: int | None = None,
         n_folds: int = 10,
         threshold: float = 4.0,
-        cache_dir: str | Path = _DEFAULT_CACHE_DIR,
+        cache_dir: str | Path = DREAMER_CACHE_DIR,
         batch_size: int = 32,
         num_workers: int = 0,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None = None,
