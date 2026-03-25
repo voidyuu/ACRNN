@@ -12,11 +12,17 @@ from .data import VALID_FOLDS, DreamerDataloader
 from .model import ACRNN
 from .utils import resolve_device
 
-# DREAMER EEG: 14 channels × 256 timepoints (2 s at 128 Hz)
-_DREAMER_CHANNELS = 14
-_DREAMER_TIMEPOINTS = 256
-
 VALID_TARGETS = {"valence", "arousal"}
+
+
+def _infer_input_shape(train_loader: DataLoader) -> tuple[int, int]:
+    """Infer ``(channels, timepoints)`` from one training batch."""
+    xb, _ = next(iter(train_loader))
+    if xb.ndim != 3:
+        raise ValueError(
+            f"Expected batched EEG tensors with shape (batch, channels, timepoints), got {tuple(xb.shape)}."
+        )
+    return int(xb.shape[1]), int(xb.shape[2])
 
 
 class EarlyStopping:
@@ -176,15 +182,17 @@ def cross_validate_model(
             batch_size=batch_size,
             num_workers=num_workers,
         )
+        num_channels, num_timepoints = _infer_input_shape(dl.train)
 
         train_size = len(dl.train.dataset)  # type: ignore[arg-type]
         print(f"  Train samples: {train_size}")
+        print(f"  Input shape : {num_channels} × {num_timepoints}")
 
         model = ACRNN(
             reduce=2,
             k=40,
-            num_channels=_DREAMER_CHANNELS,
-            num_timepoints=_DREAMER_TIMEPOINTS,
+            num_channels=num_channels,
+            num_timepoints=num_timepoints,
         ).to(training_device)
 
         best_state = train_model(

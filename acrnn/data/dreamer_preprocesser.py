@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import scipy.io
 
+from .preprocess_utils import compute_baseline_template, remove_baseline_template
+
 # ── Module-level logger ───────────────────────────────────────────────────────
 _LOG = logging.getLogger(__name__)
 
@@ -29,8 +31,8 @@ DREAMER_BASELINE_SAMPLES: int = 7808  # 61 s × 128 Hz
 #: Number of label dimensions stored per window: [valence, arousal, dominance].
 DREAMER_N_LABEL_DIMS: int = 3
 
-#: Default window length (seconds).  Matches ACRNN's ``num_timepoints=256``.
-DEFAULT_WINDOW_SECS: float = 2.0
+#: Default window length (seconds).  Matches ACRNN's ``14 × 384`` input.
+DEFAULT_WINDOW_SECS: float = 3.0
 
 #: Default path to the DREAMER.mat file.
 DEFAULT_MAT_PATH: Path = Path("data/dreamer/DREAMER.mat")
@@ -75,26 +77,6 @@ def _segment_trial(
     trimmed = trial[:, : n_windows * window_samples]  # (C, n_win × W)
     reshaped = trimmed.reshape(n_channels, n_windows, window_samples)
     return reshaped.transpose(1, 0, 2)  # (n_win, C, W)
-
-
-def _zscore_windows(windows: np.ndarray) -> np.ndarray:
-    """Per-window, per-channel z-score normalisation.
-
-    Parameters
-    ----------
-    windows:
-        Shape ``(n_windows, n_channels, window_samples)``, any float dtype.
-
-    Returns
-    -------
-    np.ndarray
-        Normalised array with the same shape, dtype ``float32``.
-        Windows / channels with std < 1e-8 are returned unchanged.
-    """
-    mean = windows.mean(axis=-1, keepdims=True)  # (n_win, C, 1)
-    std = windows.std(axis=-1, keepdims=True)  # (n_win, C, 1)
-    safe_std = np.where(std < 1e-8, 1.0, std)
-    return ((windows - mean) / safe_std).astype(np.float32)
 
 
 # ── MATLAB struct helpers ─────────────────────────────────────────────────────
@@ -149,26 +131,19 @@ def preprocess_subject(
 
     for trial_idx in range(DREAMER_N_TRIALS):
         # Raw arrays: time × channels → (T_v, 14) and (7808, 14)
-        stimulus = stimuli_arr[trial_idx].astype(np.float32)  # (T_v, 14)
-        baseline = baseline_arr[trial_idx].astype(np.float32)  # (7808, 14)
+        stimulus = stimuli_arr[trial_idx].astype(np.float32).T  # (14, T_v)
+        baseline = baseline_arr[trial_idx].astype(np.float32).T  # (14, 7808)
 
-        # ── 1. Baseline correction ────────────────────────────────────────────
-        # Per-channel mean of resting baseline, broadcast over stimulus time.
-        bl_mean = baseline.mean(axis=0)  # (14,)
-        stimulus_bc = stimulus - bl_mean  # (T_v, 14)
+        # ── 1. Baseline-template removal (paper Eq. 1–2) ────────────────────
+        baseline_template = compute_baseline_template(baseline, sfreq)
+        stimulus_bc = remove_baseline_template(stimulus, baseline_template, sfreq)
 
-        # ── 2. Transpose to channel-first ─────────────────────────────────────
-        stimulus_ch = stimulus_bc.T  # (14, T_v)
-
-        # ── 3. Segmentation ───────────────────────────────────────────────────
-        windows = _segment_trial(stimulus_ch, win_n)  # (n_win, 14, win_n)
-
-        # ── 4. Z-score normalisation ──────────────────────────────────────────
-        windows = _zscore_windows(windows)
+        # ── 2. Segmentation ───────────────────────────────────────────────────
+        windows = _segment_trial(stimulus_bc, win_n)  # (n_win, 14, win_n)
 
         n_windows = len(windows)
 
-        # ── 5. Label repetition ───────────────────────────────────────────────
+        # ── 3. Label repetition ───────────────────────────────────────────────
         label_vec = np.array(
             [scores_v[trial_idx], scores_a[trial_idx], scores_d[trial_idx]],
             dtype=np.int8,
@@ -247,9 +222,9 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="python -m acrnn.data.dreamer_preprocesser",
         description=(
             "Offline DREAMER preprocessor.  "
-            "Reads DREAMER.mat, applies baseline correction, 2-second "
-            "windowing, and per-window z-score normalisation, then writes "
-            "per-subject .npz cache files for fast loading during training."
+            "Reads DREAMER.mat, applies the paper-aligned baseline-template "
+            "removal and 3-second segmentation pipeline, and writes per-subject "
+            ".npz cache files for fast loading during training."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -310,7 +285,8 @@ def main() -> None:
     )
     print(
         f"  Baseline   : {DREAMER_BASELINE_SAMPLES} samples"
-        f" = {DREAMER_BASELINE_SAMPLES / DREAMER_SFREQ:.0f} s (per-channel mean subtracted)"
+        f" = {DREAMER_BASELINE_SAMPLES / DREAMER_SFREQ:.0f} s"
+        " (averaged into a 1 s template and subtracted per second)"
     )
     print(f"  EEG chans  : {DREAMER_N_CHANNELS}  ({', '.join(DREAMER_CHANNEL_NAMES)})")
     print(f"  Overwrite  : {args.overwrite}")

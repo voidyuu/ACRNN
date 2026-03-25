@@ -7,6 +7,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .preprocess_utils import compute_baseline_template, remove_baseline_template
+
 # MNE is listed as a project dependency; import lazily inside the
 # filter branch so the rest of the module works even without it.
 
@@ -65,15 +67,6 @@ def _segment_trial(
     # Reshape to (C, n_windows, W) then transpose to (n_windows, C, W).
     reshaped = trimmed.reshape(n_channels, n_windows, window_samples)
     return reshaped.transpose(1, 0, 2)  # → (n_windows, C, W)
-
-
-def _zscore_windows(windows: np.ndarray) -> np.ndarray:
-    mean = windows.mean(axis=-1, keepdims=True)  # (n_windows, C, 1)
-    std = windows.std(axis=-1, keepdims=True)  # (n_windows, C, 1)
-    # Replace near-zero std to avoid numerical blow-up.
-    safe_std = np.where(std < 1e-8, 1.0, std)
-    normalised = (windows - mean) / safe_std
-    return normalised.astype(np.float32)
 
 
 def _apply_bandpass(
@@ -148,26 +141,24 @@ def preprocess_subject(
     y_parts: list[np.ndarray] = []
 
     for trial_idx in range(DEAP_N_TRIALS):
-        trial = eeg_data[trial_idx]  # (32, 8064)
+        trial = eeg_data[trial_idx].astype(np.float32)  # (32, 8064)
 
-        # ── 3. Baseline removal ───────────────────────────────────────────────
-        trial = trial[:, baseline_n:]  # (32, 7680)
+        # ── 3. Baseline-template removal (paper Eq. 1–2) ────────────────────
+        baseline = trial[:, :baseline_n]  # (32, 384)
+        stimulus = trial[:, baseline_n:]  # (32, 7680)
+        baseline_template = compute_baseline_template(baseline, DEAP_SFREQ)
+        trial = remove_baseline_template(stimulus, baseline_template, DEAP_SFREQ)
 
         # ── 4. Optional bandpass filter ───────────────────────────────────────
         if apply_filter:
             trial = _apply_bandpass(trial, DEAP_SFREQ, lowcut, highcut)
-        else:
-            trial = trial.astype(np.float32)
 
         # ── 5. Segmentation ───────────────────────────────────────────────────
         windows = _segment_trial(trial, win_n)  # (n_windows, 32, win_n)
 
-        # ── 6. Z-score normalisation ──────────────────────────────────────────
-        windows = _zscore_windows(windows)
-
         n_windows = len(windows)
 
-        # ── 7. Label repetition ───────────────────────────────────────────────
+        # ── 6. Label repetition ───────────────────────────────────────────────
         repeated_label = np.tile(labels[trial_idx], (n_windows, 1))  # (n_windows, 4)
 
         X_parts.append(windows)
@@ -249,8 +240,9 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="python -m acrnn.data.deap_preprocesser",
         description=(
             "Offline DEAP preprocessor.  "
-            "Reads raw .dat files, applies the standard pipeline, and writes "
-            "per-subject .npz cache files for fast loading during training."
+            "Reads raw .dat files, applies the paper-aligned baseline-template "
+            "removal and 3-second segmentation pipeline, and writes per-subject "
+            ".npz cache files for fast loading during training."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -333,7 +325,8 @@ def main() -> None:
         f"  Window     : {args.window_secs} s  =  {win_n} samples @ {DEAP_SFREQ:.0f} Hz"
     )
     print(
-        f"  Baseline   : {DEAP_BASELINE_SECS} s  =  {_n_baseline()} samples (removed)"
+        f"  Baseline   : {DEAP_BASELINE_SECS} s  =  {_n_baseline()} samples"
+        " (averaged into a 1 s template and subtracted per second)"
     )
     print(f"  EEG chans  : {DEAP_N_EEG_CHANNELS}  (peripheral channels discarded)")
     print(
