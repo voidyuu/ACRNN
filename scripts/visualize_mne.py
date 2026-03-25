@@ -5,55 +5,51 @@ import argparse
 import mne
 import numpy as np
 
-from acrnn.data.dreamer import VALID_TARGETS, load_dreamer_arrays
+from acrnn.data.dreamer_loader import (
+    DREAMER_CHANNEL_NAMES,
+    DREAMER_SFREQ,
+    VALID_TARGETS,
+    load_dreamer_arrays,
+)
 
-# DREAMER uses these 14 EEG channels in the DEAP-style headset layout.
-DREAMER_CHANNEL_NAMES = [
-    "AF3",
-    "F7",
-    "F3",
-    "FC5",
-    "T7",
-    "P7",
-    "O1",
-    "O2",
-    "P8",
-    "T8",
-    "FC6",
-    "F4",
-    "F8",
-    "AF4",
-]
-DREAMER_SFREQ = 128.0
+_DEFAULT_CACHE_DIR = "data/dreamer/cache"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Visualize one DREAMER EEG sample with MNE")
+    parser = argparse.ArgumentParser(
+        description="Visualize one DREAMER EEG sample with MNE",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument("index", type=int, help="Sample index to visualize")
     parser.add_argument(
         "--target",
         choices=sorted(VALID_TARGETS),
         default="valence",
-        help="Dataset target to load (default: valence)",
+        help="Dataset target to load.",
     )
     parser.add_argument(
         "--cache-dir",
         type=str,
-        default=None,
-        help="Optional HuggingFace cache directory override",
+        default=_DEFAULT_CACHE_DIR,
+        help=(
+            "Directory containing the preprocessed .npz cache files "
+            "produced by dreamer_preprocesser.py."
+        ),
     )
     parser.add_argument(
         "--duration",
         type=float,
         default=10.0,
-        help="Visible time span in seconds for the raw plot window (default: 10.0)",
+        help="Visible time span in seconds for the raw plot window.",
     )
     return parser.parse_args()
 
 
 def build_raw(sample: np.ndarray) -> mne.io.RawArray:
     if sample.ndim != 2:
-        raise ValueError(f"Expected a 2D sample shaped (channels, timepoints), got {sample.shape!r}")
+        raise ValueError(
+            f"Expected a 2D sample shaped (channels, timepoints), got {sample.shape!r}"
+        )
     if sample.shape[0] != len(DREAMER_CHANNEL_NAMES):
         raise ValueError(
             f"Expected {len(DREAMER_CHANNEL_NAMES)} channels, got shape {sample.shape!r}"
@@ -81,15 +77,16 @@ def main() -> None:
     raw = build_raw(sample)
 
     print(f"Target      : {args.target}")
+    print(f"Cache dir   : {args.cache_dir}")
     print(f"Sample index: {args.index}")
-    print(f"Label       : {label}")
-    print(f"Shape       : {sample.shape}")
+    print(f"Label       : {label}  (0 = low, 1 = high)")
+    print(f"Shape       : {sample.shape}  (channels × timepoints)")
     print(f"Duration    : {sample.shape[1] / DREAMER_SFREQ:.2f} s")
 
     raw.plot(
         duration=min(args.duration, sample.shape[1] / DREAMER_SFREQ),
         scalings="auto",
-        title=f"DREAMER sample {args.index} ({args.target})",
+        title=f"DREAMER sample {args.index} | {args.target} = {label}",
         show=True,
         block=True,
     )
