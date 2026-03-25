@@ -33,10 +33,7 @@ class ACRNN(nn.Module):
         self._build_lstm()
         self._build_attention()
 
-        self.softmax = nn.Sequential(
-            nn.Linear(self.hidden, self.num_labels),
-            nn.Softmax(dim=1),
-        )
+        self.classifier = nn.Linear(self.hidden, self.num_labels)
         self.mean_pool = nn.AdaptiveAvgPool1d(1)
 
     def _build_channel_wise(self) -> None:
@@ -107,4 +104,4 @@ class ACRNN(nn.Module):
         attention_output = attention_output.reshape(-1, self.hidden)
         attention_output = self.dropout2(attention_output)
 
-        return self.softmax(attention_output)
+        return self.classifier(attention_output)
