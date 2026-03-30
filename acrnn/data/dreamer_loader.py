@@ -149,6 +149,9 @@ class DreamerDataloader:
     #: DataLoader for the training partition.
     train: DataLoader
 
+    #: DataLoader for the validation partition (``None`` when disabled).
+    val: DataLoader | None
+
     #: DataLoader for the test partition (``None`` when no test set exists).
     test: DataLoader | None
 
@@ -163,6 +166,9 @@ class DreamerDataloader:
         cache_dir: str | Path = DREAMER_CACHE_DIR,
         batch_size: int = 32,
         num_workers: int = 0,
+        validation_split: float = 0.0,
+        normalization: str = "none",
+        seed: int = 42,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None = None,
     ) -> None:
         # ── Validate common arguments ─────────────────────────────────────────
@@ -188,6 +194,9 @@ class DreamerDataloader:
                 cache_dir=cache_dir,
                 batch_size=batch_size,
                 num_workers=num_workers,
+                validation_split=validation_split,
+                normalization=normalization,
+                seed=seed,
                 dataset_factory=dataset_factory,
             )
         else:  # subject_dependent
@@ -200,6 +209,9 @@ class DreamerDataloader:
                 cache_dir=cache_dir,
                 batch_size=batch_size,
                 num_workers=num_workers,
+                validation_split=validation_split,
+                normalization=normalization,
+                seed=seed,
                 dataset_factory=dataset_factory,
             )
 
@@ -213,6 +225,9 @@ class DreamerDataloader:
         cache_dir: Path,
         batch_size: int,
         num_workers: int,
+        validation_split: float,
+        normalization: str,
+        seed: int,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None,
     ) -> None:
         """Leave-one-subject-out split."""
@@ -253,9 +268,13 @@ class DreamerDataloader:
             split,
             batch_size=batch_size,
             num_workers=num_workers,
+            validation_split=validation_split,
+            seed=seed,
+            normalization=normalization,
             dataset_factory=dataset_factory,
         )
         self.train = bundle.train
+        self.val = bundle.val
         self.test = bundle.test
 
     def _init_subject_dependent(
@@ -268,6 +287,9 @@ class DreamerDataloader:
         cache_dir: Path,
         batch_size: int,
         num_workers: int,
+        validation_split: float,
+        normalization: str,
+        seed: int,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None,
     ) -> None:
         """Within-subject k-fold split."""
@@ -300,9 +322,13 @@ class DreamerDataloader:
             split,
             batch_size=batch_size,
             num_workers=num_workers,
+            validation_split=validation_split,
+            seed=seed,
+            normalization=normalization,
             dataset_factory=dataset_factory,
         )
         self.train = bundle.train
+        self.val = bundle.val
         self.test = bundle.test
 
     # ── Convenience properties ────────────────────────────────────────────────
