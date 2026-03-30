@@ -234,11 +234,10 @@ done
 
 if [ "$USE_FAST_PRESET" -eq 1 ]; then
     EXTRA_ARGS+=(
-        --epochs 10
+        --epochs 1
         --batch-size 10
         --patience 20
         --log-every 1
-        --save-dir ""
     )
 else
     EXTRA_ARGS+=(
