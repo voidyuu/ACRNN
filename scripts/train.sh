@@ -13,6 +13,7 @@ MODE_SPECS=("subject_dependent")
 TARGET_SPECS=("valence" "arousal")
 CACHE_DIR_OVERRIDE=""
 USE_FAST_PRESET=0
+PRESET_ARGS=()
 EXTRA_ARGS=()
 
 print_help() {
@@ -23,16 +24,16 @@ Script options:
   --dataset, --datasets VALUE    Dataset list: deap,dreamer or all
   --mode, --modes VALUE          Mode list: subject_dependent,subject_independent or all
   --target, --targets VALUE      Target list: comma-separated names or all
-  --fast                         Use the larger training preset
+  --fast                         Use the quick debug preset
   --cache-dir PATH               Override cache dir for a single dataset
   --help                         Show this help message
 
 Any other arguments are forwarded to `uv run acrnn`.
 
 This script is responsible for dataset/mode/target selection and automatic
-preprocessing. It also applies a training-size preset automatically.
-With `--fast` it uses the larger preset; without `--fast` it uses the
-lightweight preset.
+preprocessing. It also applies a training preset automatically.
+By default it uses the stronger validation-driven training setup.
+With `--fast` it uses a lighter debug preset for quick smoke tests.
 
 Examples:
   scripts/train.sh --dataset dreamer --mode all --target all
@@ -233,17 +234,40 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$USE_FAST_PRESET" -eq 1 ]; then
-    EXTRA_ARGS+=(
-        --epochs 1
-        --batch-size 10
-        --patience 20
-        --log-every 1
+    PRESET_ARGS+=(
+        --epochs 25
+        --batch-size 16
+        --learning-rate 2e-4
+        --weight-decay 1e-2
+        --optimizer adamw
+        --scheduler plateau
+        --validation-split 0.1
+        --normalization channel
+        --grad-clip 1.0
+        --threshold-min-precision 0.65
+        --threshold-min-recall 0.65
+        --patience 8
+        --min-epochs 10
+        --log-every 5
+        --num-workers 0
     )
 else
-    EXTRA_ARGS+=(
-        --epochs 500
+    PRESET_ARGS+=(
+        --epochs 80
         --batch-size 16
-        --num-workers 8
+        --learning-rate 2e-4
+        --weight-decay 1e-2
+        --optimizer adamw
+        --scheduler plateau
+        --validation-split 0.1
+        --normalization channel
+        --grad-clip 1.0
+        --threshold-min-precision 0.65
+        --threshold-min-recall 0.65
+        --patience 15
+        --min-epochs 20
+        --log-every 10
+        --num-workers 0
     )
 fi
 
@@ -277,6 +301,7 @@ for dataset in "${DATASETS[@]}"; do
                 --mode "$mode"
                 --target "$target"
             )
+            cmd+=("${PRESET_ARGS[@]}")
             cmd+=("${EXTRA_ARGS[@]}")
             "${cmd[@]}"
         done
