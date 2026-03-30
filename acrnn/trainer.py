@@ -56,6 +56,12 @@ class EvalMetrics:
         }
 
 
+@dataclass(frozen=True)
+class EvalResult:
+    metrics: EvalMetrics
+    confusion_matrix: np.ndarray
+
+
 _DATASET_CONFIGS: dict[str, DatasetConfig] = {
     "deap": DatasetConfig(
         name="deap",
@@ -194,6 +200,20 @@ def _compute_eval_metrics(
     )
 
 
+def _compute_confusion_matrix(
+    preds: torch.Tensor,
+    targets: torch.Tensor,
+) -> np.ndarray:
+    preds_np = preds.cpu().numpy().astype(np.int64)
+    targets_np = targets.cpu().numpy().astype(np.int64)
+    confusion = np.zeros((2, 2), dtype=np.int64)
+
+    for target, pred in zip(targets_np, preds_np, strict=True):
+        confusion[target, pred] += 1
+
+    return confusion
+
+
 def _make_metric_store() -> dict[str, list[float]]:
     return {name: [] for name in METRIC_NAMES}
 
@@ -273,6 +293,7 @@ def _save_metrics(
     target: str,
     mode: str,
     overall_metrics: dict[str, dict[str, float]],
+    confusion_matrix: np.ndarray,
 ) -> None:
     if output_dir is None:
         return
@@ -284,10 +305,52 @@ def _save_metrics(
         "target": target,
         "mode": mode,
         "overall_metrics": overall_metrics,
+        "confusion_matrix": confusion_matrix.tolist(),
     }
     metrics_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
 
     print(f"  Metrics saved: {metrics_path}")
+
+
+def _save_confusion_matrix_plot(
+    output_dir: Path | None,
+    dataset: str,
+    target: str,
+    mode: str,
+    confusion_matrix: np.ndarray,
+) -> None:
+    if output_dir is None:
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(5.5, 4.5))
+    im = ax.imshow(confusion_matrix, cmap="Blues", vmin=0)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(["Pred 0", "Pred 1"])
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels(["True 0", "True 1"])
+    ax.set_xlabel("Predicted label")
+    ax.set_ylabel("True label")
+    ax.set_title(f"{dataset.upper()} {target} {mode} confusion matrix")
+
+    max_value = int(confusion_matrix.max()) if confusion_matrix.size else 0
+    threshold = max_value / 2.0 if max_value > 0 else 0.0
+    for row in range(confusion_matrix.shape[0]):
+        for col in range(confusion_matrix.shape[1]):
+            value = int(confusion_matrix[row, col])
+            text_color = "white" if value > threshold else "black"
+            ax.text(col, row, str(value), ha="center", va="center", color=text_color)
+
+    fig.tight_layout()
+    output_path = output_dir / "confusion_matrix.png"
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
+
+    print("  Confusion matrix plot saved:")
+    print(f"    Heatmap: {output_path}")
 
 
 def _save_best_model(
@@ -397,10 +460,10 @@ def train_model(
 
         avg_loss = epoch_loss / dataset_size
         train_acc = correct / dataset_size
-        test_metrics: EvalMetrics | None = None
+        test_result: EvalResult | None = None
 
         if test_loader is not None:
-            test_metrics = evaluate_model(model, test_loader, device)
+            test_result = evaluate_model(model, test_loader, device)
 
         is_best = early_stopping.step(avg_loss)
         if is_best:
@@ -410,11 +473,11 @@ def train_model(
             elapsed = time() - t_start
             best_mark = "  <- best" if is_best else ""
             test_acc_text = (
-                f" | Test Acc: {test_metrics.accuracy * 100:5.1f}%"
-                f" | Precision: {test_metrics.precision * 100:5.1f}%"
-                f" | Recall: {test_metrics.recall * 100:5.1f}%"
-                f" | F1: {test_metrics.f1 * 100:5.1f}%"
-                if test_metrics is not None
+                f" | Test Acc: {test_result.metrics.accuracy * 100:5.1f}%"
+                f" | Precision: {test_result.metrics.precision * 100:5.1f}%"
+                f" | Recall: {test_result.metrics.recall * 100:5.1f}%"
+                f" | F1: {test_result.metrics.f1 * 100:5.1f}%"
+                if test_result is not None
                 else ""
             )
             print(
@@ -438,7 +501,7 @@ def train_model(
 
 def evaluate_model(
     model: ACRNN, test_loader: DataLoader, device: torch.device
-) -> EvalMetrics:
+) -> EvalResult:
     model.eval()
     all_preds, all_targets = [], []
 
@@ -452,7 +515,10 @@ def evaluate_model(
 
     all_preds = torch.cat(all_preds)
     all_targets = torch.cat(all_targets)
-    return _compute_eval_metrics(all_preds, all_targets)
+    return EvalResult(
+        metrics=_compute_eval_metrics(all_preds, all_targets),
+        confusion_matrix=_compute_confusion_matrix(all_preds, all_targets),
+    )
 
 
 def cross_validate_model(
@@ -484,6 +550,7 @@ def cross_validate_model(
     all_run_metrics = _make_metric_store()
     subject_scores: dict[int, dict[str, list[float]]] = {}
     best_run: tuple[int | None, int, EvalMetrics, dict[str, torch.Tensor]] | None = None
+    overall_confusion_matrix = np.zeros((2, 2), dtype=np.int64)
 
     for run_idx, (run_subject_id, fold) in enumerate(eval_runs, start=1):
         print(f"\n{'=' * 60}")
@@ -538,16 +605,19 @@ def cross_validate_model(
 
         assert dl.test is not None
         test_size = len(dl.test.dataset)  # type: ignore[arg-type]
-        metrics = evaluate_model(model, dl.test, training_device)
+        eval_result = evaluate_model(model, dl.test, training_device)
+        metrics = eval_result.metrics
 
         print(f"\n  Test samples : {test_size}")
         print(f"  Accuracy     : {metrics.accuracy * 100:.2f}%")
         print(f"  Precision    : {metrics.precision * 100:.2f}%")
         print(f"  Recall       : {metrics.recall * 100:.2f}%")
         print(f"  F1 Score     : {metrics.f1 * 100:.2f}%")
+        print(f"  Confusion MX : {eval_result.confusion_matrix.tolist()}")
 
         for metric_name, metric_value in metrics.as_dict().items():
             all_run_metrics[metric_name].append(metric_value)
+        overall_confusion_matrix += eval_result.confusion_matrix
         test_subject_id = _resolve_test_subject_id(config, mode, run_subject_id, fold)
         subject_metric_store = subject_scores.setdefault(test_subject_id, _make_metric_store())
         for metric_name, metric_value in metrics.as_dict().items():
@@ -592,6 +662,7 @@ def cross_validate_model(
     print(
         f"  F1 Score : {overall_metrics['f1']['mean'] * 100:.2f}% +- {overall_metrics['f1']['std'] * 100:.2f}%"
     )
+    print(f"  Confusion : {overall_confusion_matrix.tolist()}")
     print(f"{'=' * 60}")
 
     _save_subject_metric_plots(
@@ -607,6 +678,14 @@ def cross_validate_model(
         target=target,
         mode=mode,
         overall_metrics=overall_metrics,
+        confusion_matrix=overall_confusion_matrix,
+    )
+    _save_confusion_matrix_plot(
+        output_dir=output_dir,
+        dataset=dataset,
+        target=target,
+        mode=mode,
+        confusion_matrix=overall_confusion_matrix,
     )
 
     _save_best_model(
