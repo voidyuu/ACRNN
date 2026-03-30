@@ -12,8 +12,8 @@ DREAMER_TARGETS: tuple[str, ...] = ("valence", "arousal", "dominance")
 
 DEFAULT_TARGET_THRESHOLDS: dict[str, dict[str, float]] = {
     "deap": {
-        "valence": 4.0,
-        "arousal": 4.0,
+        "valence": 5.0,
+        "arousal": 5.0,
         "dominance": 5.5,
         "liking": 6.0,
     },

@@ -2,7 +2,6 @@ import torch
 from torch import nn
 
 
-
 class ACRNN(nn.Module):
     def __init__(
         self, reduce: int, k: int, num_channels: int = 32, num_timepoints: int = 384
@@ -13,7 +12,7 @@ class ACRNN(nn.Module):
         self.ratio = reduce
         self.k = k
         self.kernel_height = self.C
-        self.kernel_width = 45
+        self.kernel_width = 40
         self.kernel_stride = 1
         self.pooling_width = 75
         self.pooling_stride = 10
@@ -21,7 +20,8 @@ class ACRNN(nn.Module):
         self.hidden_attention = 512
         self.num_labels = 2
 
-        # Compute LSTM input size dynamically from W and pooling params
+        self._reduced_channels = max(1, int(self.C / self.ratio))
+
         width_after_conv = self.W - self.kernel_width + 1
         width_after_pool = (
             width_after_conv - self.pooling_width
@@ -37,8 +37,12 @@ class ACRNN(nn.Module):
         self.mean_pool = nn.AdaptiveAvgPool1d(1)
 
     def _build_channel_wise(self) -> None:
-        self.channel_projection = nn.Linear(self.C, self.C)
-        self.channel_gate = nn.Sigmoid()
+        self.channel_projection = nn.Sequential(
+            nn.Linear(self.C, self._reduced_channels),
+            nn.Tanh(),
+            nn.Linear(self._reduced_channels, self.C),
+        )
+        self.channel_gate = nn.Softmax(dim=-1)
 
     def _build_cnn(self) -> None:
         self.conv = nn.Sequential(
@@ -46,7 +50,7 @@ class ACRNN(nn.Module):
                 1, self.k, (self.kernel_height, self.kernel_width), self.kernel_stride
             ),
             nn.BatchNorm2d(self.k),
-            nn.ReLU(),
+            nn.ELU(),
             nn.MaxPool2d((1, self.pooling_width), self.pooling_stride),
             nn.Dropout(p=0.5),
         )
@@ -57,7 +61,6 @@ class ACRNN(nn.Module):
             hidden_size=self.hidden,
             num_layers=2,
             batch_first=True,
-            dropout=0.5,
         )
 
     def _build_attention(self) -> None:
@@ -68,7 +71,7 @@ class ACRNN(nn.Module):
         self.vector = nn.Linear(self.hidden, self.hidden)
         self.self_attention = nn.Sequential(
             nn.Linear(self.hidden_attention, self.hidden),
-            nn.ReLU(),
+            nn.ELU(),
         )
         self.softmax2 = nn.Softmax(dim=2)
         self.dropout2 = nn.Dropout(p=0.5)
@@ -93,7 +96,8 @@ class ACRNN(nn.Module):
         )
 
         z = self.self_attention(y)
-        p = self.softmax2(z * h)
+        p = z * h
+        p = self.softmax2(p)
 
         attention_output = p * h
         attention_output = attention_output.reshape(-1, self.hidden)
