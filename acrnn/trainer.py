@@ -28,6 +28,7 @@ from .model import ACRNN
 from .utils import make_timestamp_label, resolve_device
 
 VALID_MODES = {"subject_dependent", "subject_independent"}
+METRIC_NAMES = ("accuracy", "precision", "recall", "f1")
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,22 @@ class DatasetConfig:
     valid_targets: set[str]
     valid_subjects: list[int]
     independent_folds: list[int]
+
+
+@dataclass(frozen=True)
+class EvalMetrics:
+    accuracy: float
+    precision: float
+    recall: float
+    f1: float
+
+    def as_dict(self) -> dict[str, float]:
+        return {
+            "accuracy": self.accuracy,
+            "precision": self.precision,
+            "recall": self.recall,
+            "f1": self.f1,
+        }
 
 
 _DATASET_CONFIGS: dict[str, DatasetConfig] = {
@@ -146,12 +163,57 @@ def _resolve_test_subject_id(
     return run_subject_id
 
 
-def _save_subject_accuracy_plots(
+def _safe_divide(numerator: float, denominator: float) -> float:
+    if denominator == 0:
+        return 0.0
+    return numerator / denominator
+
+
+def _compute_eval_metrics(
+    preds: torch.Tensor,
+    targets: torch.Tensor,
+) -> EvalMetrics:
+    preds = preds.to(torch.long)
+    targets = targets.to(torch.long)
+
+    tp = float(((preds == 1) & (targets == 1)).sum().item())
+    fp = float(((preds == 1) & (targets == 0)).sum().item())
+    fn = float(((preds == 0) & (targets == 1)).sum().item())
+    correct = float((preds == targets).sum().item())
+    total = float(targets.numel())
+
+    precision = _safe_divide(tp, tp + fp)
+    recall = _safe_divide(tp, tp + fn)
+    f1 = _safe_divide(2.0 * precision * recall, precision + recall)
+
+    return EvalMetrics(
+        accuracy=_safe_divide(correct, total),
+        precision=precision,
+        recall=recall,
+        f1=f1,
+    )
+
+
+def _make_metric_store() -> dict[str, list[float]]:
+    return {name: [] for name in METRIC_NAMES}
+
+
+def _summarise_metric_store(metric_store: dict[str, list[float]]) -> dict[str, dict[str, float]]:
+    return {
+        name: {
+            "mean": float(np.mean(values)),
+            "std": float(np.std(values)),
+        }
+        for name, values in metric_store.items()
+    }
+
+
+def _save_subject_metric_plots(
     output_dir: Path | None,
     dataset: str,
     target: str,
     mode: str,
-    subject_scores: dict[int, list[float]],
+    subject_scores: dict[int, dict[str, list[float]]],
 ) -> None:
     if output_dir is None or not subject_scores:
         return
@@ -159,34 +221,50 @@ def _save_subject_accuracy_plots(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     subject_ids = sorted(subject_scores)
-    mean_scores = [float(np.mean(subject_scores[sid])) for sid in subject_ids]
-    std_scores = [float(np.std(subject_scores[sid])) for sid in subject_ids]
-
     x = np.arange(len(subject_ids))
 
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(x, mean_scores, marker="o", linewidth=2, color="#F58518")
-    ax.fill_between(
-        x,
-        np.maximum(0.0, np.array(mean_scores) - np.array(std_scores)),
-        np.minimum(1.0, np.array(mean_scores) + np.array(std_scores)),
-        color="#F58518",
-        alpha=0.15,
-    )
-    ax.set_title(f"{dataset.upper()} {target} {mode} subject accuracy")
-    ax.set_xlabel("Subject")
-    ax.set_ylabel("Accuracy")
-    ax.set_ylim(0.0, 1.0)
-    ax.set_xticks(x)
-    ax.set_xticklabels([str(sid) for sid in subject_ids])
-    ax.grid(axis="y", linestyle="--", alpha=0.3)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9), sharex=True)
+    metric_styles = {
+        "accuracy": ("Accuracy", "#F58518"),
+        "precision": ("Precision", "#4C78A8"),
+        "recall": ("Recall", "#54A24B"),
+        "f1": ("F1 Score", "#E45756"),
+    }
+
+    for ax, metric_name in zip(axes.flat, METRIC_NAMES, strict=True):
+        label, color = metric_styles[metric_name]
+        mean_scores = [
+            float(np.mean(subject_scores[sid][metric_name])) for sid in subject_ids
+        ]
+        std_scores = [
+            float(np.std(subject_scores[sid][metric_name])) for sid in subject_ids
+        ]
+        ax.plot(x, mean_scores, marker="o", linewidth=2, color=color)
+        ax.fill_between(
+            x,
+            np.maximum(0.0, np.array(mean_scores) - np.array(std_scores)),
+            np.minimum(1.0, np.array(mean_scores) + np.array(std_scores)),
+            color=color,
+            alpha=0.15,
+        )
+        ax.set_title(label)
+        ax.set_ylim(0.0, 1.0)
+        ax.set_xticks(x)
+        ax.set_xticklabels([str(sid) for sid in subject_ids])
+        ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+    axes[1, 0].set_xlabel("Subject")
+    axes[1, 1].set_xlabel("Subject")
+    axes[0, 0].set_ylabel("Score")
+    axes[1, 0].set_ylabel("Score")
+    fig.suptitle(f"{dataset.upper()} {target} {mode} subject metrics", fontsize=14)
     fig.tight_layout()
-    line_path = output_dir / "subject_accuracy_line.png"
-    fig.savefig(line_path, dpi=200)
+    metrics_plot_path = output_dir / "subject_metrics_grid.png"
+    fig.savefig(metrics_plot_path, dpi=200)
     plt.close(fig)
 
-    print("\n  Subject accuracy plot saved:")
-    print(f"    Line chart: {line_path}")
+    print("\n  Subject metric plot saved:")
+    print(f"    Grid chart: {metrics_plot_path}")
 
 
 def _save_metrics(
@@ -194,8 +272,7 @@ def _save_metrics(
     dataset: str,
     target: str,
     mode: str,
-    overall_mean: float,
-    overall_std: float,
+    overall_metrics: dict[str, dict[str, float]],
 ) -> None:
     if output_dir is None:
         return
@@ -206,8 +283,7 @@ def _save_metrics(
         "dataset": dataset,
         "target": target,
         "mode": mode,
-        "overall_mean": overall_mean,
-        "overall_std": overall_std,
+        "overall_metrics": overall_metrics,
     }
     metrics_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
 
@@ -219,7 +295,7 @@ def _save_best_model(
     dataset: str,
     target: str,
     mode: str,
-    best_run: tuple[int | None, int, float, dict[str, torch.Tensor]] | None,
+    best_run: tuple[int | None, int, EvalMetrics, dict[str, torch.Tensor]] | None,
     epochs: int,
     batch_size: int,
     threshold: float,
@@ -227,7 +303,7 @@ def _save_best_model(
     if output_dir is None or best_run is None:
         return
 
-    best_subject, best_fold, best_acc, best_state = best_run
+    best_subject, best_fold, best_metrics, best_state = best_run
     output_dir.mkdir(parents=True, exist_ok=True)
     filename = output_dir / "weight.pt"
 
@@ -239,7 +315,10 @@ def _save_best_model(
             "mode": mode,
             "subject_id": best_subject,
             "fold": best_fold,
-            "test_acc": best_acc,
+            "test_acc": best_metrics.accuracy,
+            "test_precision": best_metrics.precision,
+            "test_recall": best_metrics.recall,
+            "test_f1": best_metrics.f1,
             "epochs": epochs,
             "batch_size": batch_size,
             "threshold": threshold,
@@ -250,7 +329,7 @@ def _save_best_model(
         "all-subject sweep" if best_subject is None else f"subject {best_subject}"
     )
     print(
-        f"\n  Best weights ({subject_text}, fold {best_fold + 1}, acc {best_acc * 100:.2f}%) saved -> {filename}"
+        f"\n  Best weights ({subject_text}, fold {best_fold + 1}, acc {best_metrics.accuracy * 100:.2f}%) saved -> {filename}"
     )
 
 
@@ -318,10 +397,10 @@ def train_model(
 
         avg_loss = epoch_loss / dataset_size
         train_acc = correct / dataset_size
-        test_acc: float | None = None
+        test_metrics: EvalMetrics | None = None
 
         if test_loader is not None:
-            test_acc = evaluate_model(model, test_loader, device)
+            test_metrics = evaluate_model(model, test_loader, device)
 
         is_best = early_stopping.step(avg_loss)
         if is_best:
@@ -331,7 +410,12 @@ def train_model(
             elapsed = time() - t_start
             best_mark = "  <- best" if is_best else ""
             test_acc_text = (
-                f" | Test Acc: {test_acc * 100:5.1f}%" if test_acc is not None else ""
+                f" | Test Acc: {test_metrics.accuracy * 100:5.1f}%"
+                f" | Precision: {test_metrics.precision * 100:5.1f}%"
+                f" | Recall: {test_metrics.recall * 100:5.1f}%"
+                f" | F1: {test_metrics.f1 * 100:5.1f}%"
+                if test_metrics is not None
+                else ""
             )
             print(
                 f"  Epoch {epoch + 1:{epoch_w}d}/{epochs}"
@@ -354,7 +438,7 @@ def train_model(
 
 def evaluate_model(
     model: ACRNN, test_loader: DataLoader, device: torch.device
-) -> float:
+) -> EvalMetrics:
     model.eval()
     all_preds, all_targets = [], []
 
@@ -368,7 +452,7 @@ def evaluate_model(
 
     all_preds = torch.cat(all_preds)
     all_targets = torch.cat(all_targets)
-    return (all_preds == all_targets).sum().item() / len(all_preds)
+    return _compute_eval_metrics(all_preds, all_targets)
 
 
 def cross_validate_model(
@@ -397,9 +481,9 @@ def cross_validate_model(
     threshold = get_default_threshold(dataset, target) if threshold is None else threshold
     eval_runs = _resolve_eval_runs(config, mode, subject_id, n_folds)
 
-    all_run_acc: list[float] = []
-    subject_scores: dict[int, list[float]] = {}
-    best_run: tuple[int | None, int, float, dict[str, torch.Tensor]] | None = None
+    all_run_metrics = _make_metric_store()
+    subject_scores: dict[int, dict[str, list[float]]] = {}
+    best_run: tuple[int | None, int, EvalMetrics, dict[str, torch.Tensor]] | None = None
 
     for run_idx, (run_subject_id, fold) in enumerate(eval_runs, start=1):
         print(f"\n{'=' * 60}")
@@ -454,30 +538,39 @@ def cross_validate_model(
 
         assert dl.test is not None
         test_size = len(dl.test.dataset)  # type: ignore[arg-type]
-        acc = evaluate_model(model, dl.test, training_device)
+        metrics = evaluate_model(model, dl.test, training_device)
 
         print(f"\n  Test samples : {test_size}")
-        print(f"  Accuracy     : {acc * 100:.2f}%")
+        print(f"  Accuracy     : {metrics.accuracy * 100:.2f}%")
+        print(f"  Precision    : {metrics.precision * 100:.2f}%")
+        print(f"  Recall       : {metrics.recall * 100:.2f}%")
+        print(f"  F1 Score     : {metrics.f1 * 100:.2f}%")
 
-        all_run_acc.append(acc)
+        for metric_name, metric_value in metrics.as_dict().items():
+            all_run_metrics[metric_name].append(metric_value)
         test_subject_id = _resolve_test_subject_id(config, mode, run_subject_id, fold)
-        subject_scores.setdefault(test_subject_id, []).append(acc)
+        subject_metric_store = subject_scores.setdefault(test_subject_id, _make_metric_store())
+        for metric_name, metric_value in metrics.as_dict().items():
+            subject_metric_store[metric_name].append(metric_value)
 
-        if best_run is None or acc > best_run[2]:
-            best_run = (run_subject_id, fold, acc, best_state)
+        if best_run is None or metrics.accuracy > best_run[2].accuracy:
+            best_run = (run_subject_id, fold, metrics, best_state)
 
     if subject_scores and (mode == "subject_independent" or subject_id is None):
         print(f"\n{'-' * 60}")
         print("  Per-subject summary")
         print(f"{'-' * 60}")
         for sid in sorted(subject_scores):
-            scores = subject_scores[sid]
-            mean = float(np.mean(scores))
-            std = float(np.std(scores))
-            print(f"  Subject {sid:02d}: {mean * 100:.2f}% +- {std * 100:.2f}%")
+            summary = _summarise_metric_store(subject_scores[sid])
+            print(
+                f"  Subject {sid:02d}: "
+                f"Acc {summary['accuracy']['mean'] * 100:.2f}% +- {summary['accuracy']['std'] * 100:.2f}%"
+                f" | Prec {summary['precision']['mean'] * 100:.2f}%"
+                f" | Rec {summary['recall']['mean'] * 100:.2f}%"
+                f" | F1 {summary['f1']['mean'] * 100:.2f}%"
+            )
 
-    overall_mean = float(np.mean(all_run_acc))
-    overall_std = float(np.std(all_run_acc))
+    overall_metrics = _summarise_metric_store(all_run_metrics)
     timestamp_label = make_timestamp_label()
     output_dir = (
         None
@@ -487,10 +580,21 @@ def cross_validate_model(
 
     print(f"\n{'=' * 60}")
     print(f"  Overall result  |  dataset: {dataset}  |  target: {target}")
-    print(f"  Accuracy: {overall_mean * 100:.2f}% +- {overall_std * 100:.2f}%")
+    print(
+        f"  Accuracy : {overall_metrics['accuracy']['mean'] * 100:.2f}% +- {overall_metrics['accuracy']['std'] * 100:.2f}%"
+    )
+    print(
+        f"  Precision: {overall_metrics['precision']['mean'] * 100:.2f}% +- {overall_metrics['precision']['std'] * 100:.2f}%"
+    )
+    print(
+        f"  Recall   : {overall_metrics['recall']['mean'] * 100:.2f}% +- {overall_metrics['recall']['std'] * 100:.2f}%"
+    )
+    print(
+        f"  F1 Score : {overall_metrics['f1']['mean'] * 100:.2f}% +- {overall_metrics['f1']['std'] * 100:.2f}%"
+    )
     print(f"{'=' * 60}")
 
-    _save_subject_accuracy_plots(
+    _save_subject_metric_plots(
         output_dir=output_dir,
         dataset=dataset,
         target=target,
@@ -502,8 +606,7 @@ def cross_validate_model(
         dataset=dataset,
         target=target,
         mode=mode,
-        overall_mean=overall_mean,
-        overall_std=overall_std,
+        overall_metrics=overall_metrics,
     )
 
     _save_best_model(
@@ -517,4 +620,4 @@ def cross_validate_model(
         threshold=threshold,
     )
 
-    return overall_mean, overall_std
+    return overall_metrics["accuracy"]["mean"], overall_metrics["accuracy"]["std"]
