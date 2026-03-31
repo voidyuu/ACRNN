@@ -246,14 +246,14 @@ if [ "$USE_FAST_PRESET" -eq 1 ]; then
         --grad-clip 1.0
         --threshold-min-precision 0.65
         --threshold-min-recall 0.65
-        --patience 8
+        --patience 30
         --min-epochs 10
         --log-every 5
         --num-workers 0
     )
 else
     PRESET_ARGS+=(
-        --epochs 80
+        --epochs 200
         --batch-size 16
         --learning-rate 2e-4
         --weight-decay 1e-2
@@ -264,7 +264,7 @@ else
         --grad-clip 1.0
         --threshold-min-precision 0.65
         --threshold-min-recall 0.65
-        --patience 15
+        --patience 30
         --min-epochs 20
         --log-every 10
         --num-workers 0

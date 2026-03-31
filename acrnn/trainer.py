@@ -29,6 +29,7 @@ from .utils import make_timestamp_label, resolve_device
 
 VALID_MODES = {"subject_dependent", "subject_independent"}
 METRIC_NAMES = ("accuracy", "precision", "recall", "f1")
+VALID_CLASS_WEIGHTING = {"none", "balanced"}
 
 
 @dataclass(frozen=True)
@@ -232,6 +233,30 @@ def _compute_confusion_matrix(
 
 def _make_metric_store() -> dict[str, list[float]]:
     return {name: [] for name in METRIC_NAMES}
+
+
+def _compute_balanced_class_weights(
+    train_loader: DataLoader,
+    num_labels: int = 2,
+) -> torch.Tensor | None:
+    dataset = train_loader.dataset  # type: ignore[assignment]
+    labels = getattr(dataset, "labels", None)
+
+    if labels is None:
+        counts = torch.zeros(num_labels, dtype=torch.float32)
+        for _, yb in train_loader:
+            counts += torch.bincount(yb.to(torch.long), minlength=num_labels).to(torch.float32)
+    else:
+        label_tensor = torch.as_tensor(labels, dtype=torch.long)
+        counts = torch.bincount(label_tensor, minlength=num_labels).to(torch.float32)
+
+    nonzero = counts > 0
+    if nonzero.sum().item() < 2:
+        return None
+
+    weights = torch.ones(num_labels, dtype=torch.float32)
+    weights[nonzero] = counts[nonzero].sum() / (float(nonzero.sum().item()) * counts[nonzero])
+    return weights
 
 
 def _score_metrics(metrics: EvalMetrics) -> float:
@@ -563,8 +588,27 @@ def train_model(
     grad_clip_norm: float = 1.0,
     threshold_min_precision: float = 0.65,
     threshold_min_recall: float = 0.65,
+    class_weighting: str = "balanced",
 ) -> TrainResult:
-    criterion = nn.CrossEntropyLoss()
+    if class_weighting not in VALID_CLASS_WEIGHTING:
+        raise ValueError(
+            f"class_weighting must be one of {sorted(VALID_CLASS_WEIGHTING)}, got {class_weighting!r}"
+        )
+
+    criterion_weights = (
+        _compute_balanced_class_weights(train_loader)
+        if class_weighting == "balanced"
+        else None
+    )
+    criterion = nn.CrossEntropyLoss(
+        weight=criterion_weights.to(device) if criterion_weights is not None else None
+    )
+
+    if criterion_weights is not None:
+        weights_text = ", ".join(f"{float(weight):.4f}" for weight in criterion_weights)
+        print(f"  Class weights: [{weights_text}]")
+    elif class_weighting == "balanced":
+        print("  Class weights: skipped (training fold contains a single class)")
 
     if optimizer_name == "adam":
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -761,6 +805,7 @@ def cross_validate_model(
     normalization: str = "channel",
     threshold_min_precision: float = 0.65,
     threshold_min_recall: float = 0.65,
+    class_weighting: str = "balanced",
     seed: int = 42,
     save_dir: str | None = "checkpoints",
 ) -> tuple[float, float]:
@@ -841,6 +886,7 @@ def cross_validate_model(
             grad_clip_norm=grad_clip_norm,
             threshold_min_precision=threshold_min_precision,
             threshold_min_recall=threshold_min_recall,
+            class_weighting=class_weighting,
         )
         model.load_state_dict(train_result.state_dict)
 
