@@ -251,8 +251,8 @@ if [ "$USE_FAST_PRESET" -eq 1 ]; then
     )
 else
     PRESET_ARGS+=(
-        --epochs 300
-        --batch-size 32
+        --epochs 200
+        --batch-size 16
         --learning-rate 2e-4
         --weight-decay 1e-2
         --optimizer adamw
@@ -263,7 +263,7 @@ else
         --threshold-min-precision 0.65
         --threshold-min-recall 0.65
         --log-every 20
-        --num-workers 4
+        --num-workers 2
     )
 fi
 
