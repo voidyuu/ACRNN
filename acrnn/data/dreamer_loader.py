@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
 import numpy as np
+import scipy.io
 from torch.utils.data import DataLoader, Dataset
 
-from ..config import DREAMER_CACHE_DIR, DREAMER_TARGETS, get_default_threshold
+from ..config import (
+    DREAMER_CACHE_DIR,
+    DREAMER_MAT_PATH,
+    DREAMER_TARGETS,
+    get_default_threshold,
+)
 from .loaders import LoaderBundle, build_dataloaders
-from .split import DataSplit, build_kfold_splits
+from .split import DataSplit, build_group_stratified_kfold_splits
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +41,9 @@ DREAMER_SFREQ: float = 128.0
 
 #: Number of EEG channels retained after preprocessing.
 DREAMER_N_CHANNELS: int = 14
+
+#: Number of emotion-eliciting trials per subject.
+DREAMER_N_TRIALS: int = 18
 
 #: EEG channel names (EMOTIV EPOC headset layout).
 DREAMER_CHANNEL_NAMES: list[str] = [
@@ -100,6 +110,56 @@ def _binarise(
     return (y_raw_col >= threshold).astype(np.int64)
 
 
+def _build_trial_groups(
+    trial_window_counts: np.ndarray,
+    group_offset: int = 0,
+) -> np.ndarray:
+    if trial_window_counts.ndim != 1:
+        raise ValueError(
+            "trial_window_counts must be 1-D, "
+            f"got shape {trial_window_counts.shape!r}"
+        )
+
+    trial_groups = np.repeat(
+        np.arange(len(trial_window_counts), dtype=np.int64),
+        trial_window_counts,
+    )
+    return trial_groups + group_offset
+
+
+@lru_cache(maxsize=1)
+def _load_trial_sample_counts() -> tuple[tuple[int, ...], ...]:
+    mat = scipy.io.loadmat(str(DREAMER_MAT_PATH), squeeze_me=True)
+    dataset = mat["DREAMER"]
+    subjects: list = list(dataset["Data"].item())
+
+    sample_counts: list[tuple[int, ...]] = []
+    for subject_struct in subjects:
+        eeg = subject_struct["EEG"].item()
+        stimuli_arr = eeg["stimuli"].item()
+        sample_counts.append(
+            tuple(int(stimulus_raw.shape[0]) for stimulus_raw in stimuli_arr)
+        )
+
+    return tuple(sample_counts)
+
+
+def _resolve_subject_trial_window_counts(
+    subject_id: int,
+    window_samples: int,
+) -> np.ndarray:
+    sample_counts = _load_trial_sample_counts()[subject_id - 1]
+    trial_window_counts = np.asarray(
+        [sample_count // window_samples for sample_count in sample_counts],
+        dtype=np.int64,
+    )
+    if len(trial_window_counts) != DREAMER_N_TRIALS:
+        raise ValueError(
+            f"Expected {DREAMER_N_TRIALS} DREAMER trial counts, got {len(trial_window_counts)}"
+        )
+    return trial_window_counts
+
+
 # ── Public array-loading API ──────────────────────────────────────────────────
 
 
@@ -108,7 +168,8 @@ def load_dreamer_arrays(
     subject_ids: list[int] | None = None,
     cache_dir: str | Path = DREAMER_CACHE_DIR,
     threshold: float | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+    return_groups: bool = False,
+) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
 
     if target not in VALID_TARGETS:
         raise ValueError(
@@ -131,14 +192,37 @@ def load_dreamer_arrays(
     col = _LABEL_COL[target]
     X_parts: list[np.ndarray] = []
     y_parts: list[np.ndarray] = []
+    group_parts: list[np.ndarray] = []
+    group_offset = 0
 
     for sid in ids:
         X_sub, y_raw_sub = _load_subject_cache(sid, cache_dir)
         X_parts.append(X_sub)
         y_parts.append(_binarise(y_raw_sub[:, col], threshold))
+        if return_groups:
+            trial_window_counts = _resolve_subject_trial_window_counts(
+                subject_id=sid,
+                window_samples=int(X_sub.shape[-1]),
+            )
+            if int(trial_window_counts.sum()) != len(X_sub):
+                raise ValueError(
+                    "Resolved DREAMER trial window counts do not match the cached "
+                    f"window total for subject {sid}: "
+                    f"expected {int(trial_window_counts.sum())}, got {len(X_sub)}"
+                )
+            group_parts.append(
+                _build_trial_groups(
+                    trial_window_counts=trial_window_counts,
+                    group_offset=group_offset,
+                )
+            )
+            group_offset += DREAMER_N_TRIALS
 
     X = np.concatenate(X_parts, axis=0)
     y = np.concatenate(y_parts, axis=0)
+    if return_groups:
+        groups = np.concatenate(group_parts, axis=0)
+        return X, y, groups
     return X, y
 
 
@@ -148,6 +232,9 @@ def load_dreamer_arrays(
 class DreamerDataloader:
     #: DataLoader for the training partition.
     train: DataLoader
+
+    #: DataLoader for the validation partition (``None`` when disabled).
+    val: DataLoader | None
 
     #: DataLoader for the test partition (``None`` when no test set exists).
     test: DataLoader | None
@@ -163,6 +250,9 @@ class DreamerDataloader:
         cache_dir: str | Path = DREAMER_CACHE_DIR,
         batch_size: int = 32,
         num_workers: int = 0,
+        validation_split: float = 0.0,
+        normalization: str = "none",
+        seed: int = 42,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None = None,
     ) -> None:
         # ── Validate common arguments ─────────────────────────────────────────
@@ -188,6 +278,9 @@ class DreamerDataloader:
                 cache_dir=cache_dir,
                 batch_size=batch_size,
                 num_workers=num_workers,
+                validation_split=validation_split,
+                normalization=normalization,
+                seed=seed,
                 dataset_factory=dataset_factory,
             )
         else:  # subject_dependent
@@ -200,6 +293,9 @@ class DreamerDataloader:
                 cache_dir=cache_dir,
                 batch_size=batch_size,
                 num_workers=num_workers,
+                validation_split=validation_split,
+                normalization=normalization,
+                seed=seed,
                 dataset_factory=dataset_factory,
             )
 
@@ -213,6 +309,9 @@ class DreamerDataloader:
         cache_dir: Path,
         batch_size: int,
         num_workers: int,
+        validation_split: float,
+        normalization: str,
+        seed: int,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None,
     ) -> None:
         """Leave-one-subject-out split."""
@@ -229,11 +328,19 @@ class DreamerDataloader:
         # Load training and test data separately, then concatenate into a
         # single array pair so build_dataloaders can index into them with
         # the DataSplit indices.
-        X_train, y_train = load_dreamer_arrays(
-            target, train_subject_ids, cache_dir, threshold
+        X_train, y_train, train_groups = load_dreamer_arrays(
+            target,
+            train_subject_ids,
+            cache_dir,
+            threshold,
+            return_groups=True,
         )
-        X_test, y_test = load_dreamer_arrays(
-            target, [test_subject_id], cache_dir, threshold
+        X_test, y_test, test_groups = load_dreamer_arrays(
+            target,
+            [test_subject_id],
+            cache_dir,
+            threshold,
+            return_groups=True,
         )
 
         n_train = len(y_train)
@@ -241,6 +348,13 @@ class DreamerDataloader:
 
         X_all = np.concatenate([X_train, X_test], axis=0)
         y_all = np.concatenate([y_train, y_test], axis=0)
+        groups_all = np.concatenate(
+            [
+                train_groups,
+                test_groups + (int(train_groups.max()) + 1 if len(train_groups) > 0 else 0),
+            ],
+            axis=0,
+        )
 
         split = DataSplit(
             train_idx=np.arange(n_train),
@@ -251,11 +365,16 @@ class DreamerDataloader:
             X_all,
             y_all,
             split,
+            groups=groups_all,
             batch_size=batch_size,
             num_workers=num_workers,
+            validation_split=validation_split,
+            seed=seed,
+            normalization=normalization,
             dataset_factory=dataset_factory,
         )
         self.train = bundle.train
+        self.val = bundle.val
         self.test = bundle.test
 
     def _init_subject_dependent(
@@ -268,6 +387,9 @@ class DreamerDataloader:
         cache_dir: Path,
         batch_size: int,
         num_workers: int,
+        validation_split: float,
+        normalization: str,
+        seed: int,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None,
     ) -> None:
         """Within-subject k-fold split."""
@@ -287,22 +409,33 @@ class DreamerDataloader:
                 f"subject_dependent mode with n_folds={n_folds}, got {fold}"
             )
 
-        X_all, y_all = load_dreamer_arrays(target, [subject_id], cache_dir, threshold)
+        X_all, y_all, groups = load_dreamer_arrays(
+            target,
+            [subject_id],
+            cache_dir,
+            threshold,
+            return_groups=True,
+        )
 
-        # build_kfold_splits returns a list of DataSplit objects; select
-        # the requested fold.
-        splits = build_kfold_splits(len(y_all), k=n_folds)
+        # Keep entire trials together so windows from one trial cannot leak
+        # across train/validation/test partitions.
+        splits = build_group_stratified_kfold_splits(y_all, groups, k=n_folds, seed=seed)
         split = splits[fold]
 
         bundle: LoaderBundle = build_dataloaders(
             X_all,
             y_all,
             split,
+            groups=groups,
             batch_size=batch_size,
             num_workers=num_workers,
+            validation_split=validation_split,
+            seed=seed,
+            normalization=normalization,
             dataset_factory=dataset_factory,
         )
         self.train = bundle.train
+        self.val = bundle.val
         self.test = bundle.test
 
     # ── Convenience properties ────────────────────────────────────────────────

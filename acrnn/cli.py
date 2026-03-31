@@ -69,8 +69,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=10,
-        help="Batch size (default: 10)",
+        default=16,
+        help="Batch size (default: 16)",
     )
     parser.add_argument(
         "--num-workers",
@@ -87,14 +87,86 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--log-every",
         type=int,
-        default=10,
-        help="Print metrics every N epochs (default: 1)",
+        default=5,
+        help="Print metrics every N epochs (default: 5)",
     )
     parser.add_argument(
         "--patience",
         type=int,
-        default=0,
-        help="Early stopping patience in epochs; 0 disables it (default: 0)",
+        default=15,
+        help="Early stopping patience in epochs (default: 15)",
+    )
+    parser.add_argument(
+        "--min-epochs",
+        type=int,
+        default=20,
+        help="Minimum epochs to run before early stopping can trigger (default: 20)",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=2e-4,
+        help="Optimizer learning rate (default: 2e-4)",
+    )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=1e-2,
+        help="Weight decay used by AdamW (default: 1e-2)",
+    )
+    parser.add_argument(
+        "--optimizer",
+        choices=["adam", "adamw"],
+        default="adamw",
+        help="Optimizer to use (default: adamw)",
+    )
+    parser.add_argument(
+        "--scheduler",
+        choices=["none", "cosine", "plateau"],
+        default="plateau",
+        help="Learning-rate scheduler (default: plateau)",
+    )
+    parser.add_argument(
+        "--grad-clip",
+        type=float,
+        default=1.0,
+        help="Gradient clipping norm; 0 disables clipping (default: 1.0)",
+    )
+    parser.add_argument(
+        "--validation-split",
+        type=float,
+        default=0.1,
+        help="Fraction of the training fold held out for validation and threshold tuning (default: 0.1)",
+    )
+    parser.add_argument(
+        "--normalization",
+        choices=["none", "channel"],
+        default="channel",
+        help="Input normalization strategy (default: channel)",
+    )
+    parser.add_argument(
+        "--threshold-min-precision",
+        type=float,
+        default=0.65,
+        help="Minimum validation precision when scanning decision thresholds (default: 0.65)",
+    )
+    parser.add_argument(
+        "--threshold-min-recall",
+        type=float,
+        default=0.65,
+        help="Minimum validation recall when scanning decision thresholds (default: 0.65)",
+    )
+    parser.add_argument(
+        "--class-weighting",
+        choices=["none", "balanced"],
+        default="balanced",
+        help="Loss weighting strategy derived from the training-fold class balance (default: balanced)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for validation splits (default: 42)",
     )
     parser.add_argument(
         "--save-dir",
@@ -124,6 +196,17 @@ def main() -> None:
     print(f"Device    : {args.device or 'auto'}")
     print(f"Log every : {args.log_every} epochs")
     print(f"Patience  : {args.patience if args.patience > 0 else 'disabled'}")
+    print(f"Min epochs: {args.min_epochs}")
+    print(f"LR        : {args.learning_rate}")
+    print(f"W decay   : {args.weight_decay}")
+    print(f"Optim     : {args.optimizer}")
+    print(f"Sched     : {args.scheduler}")
+    print(f"Grad clip : {args.grad_clip}")
+    print(f"Val split : {args.validation_split}")
+    print(f"Norm      : {args.normalization}")
+    print(f"Thr floor : prec>={args.threshold_min_precision}, rec>={args.threshold_min_recall}")
+    print(f"Cls weight: {args.class_weighting}")
+    print(f"Seed      : {args.seed}")
     print(f"Save dir  : {args.save_dir or '(disabled)'}")
     print()
 
@@ -141,6 +224,18 @@ def main() -> None:
         num_workers=args.num_workers,
         log_every=args.log_every,
         patience=args.patience,
+        min_epochs=args.min_epochs,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        optimizer_name=args.optimizer,
+        scheduler_name=args.scheduler,
+        grad_clip_norm=args.grad_clip,
+        validation_split=args.validation_split,
+        normalization=args.normalization,
+        threshold_min_precision=args.threshold_min_precision,
+        threshold_min_recall=args.threshold_min_recall,
+        class_weighting=args.class_weighting,
+        seed=args.seed,
         save_dir=args.save_dir or None,
     )
 
