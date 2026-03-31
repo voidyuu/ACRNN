@@ -91,12 +91,6 @@ def parse_args() -> argparse.Namespace:
         help="Print metrics every N epochs (default: 5)",
     )
     parser.add_argument(
-        "--patience",
-        type=int,
-        default=15,
-        help="Early stopping patience in epochs (default: 15)",
-    )
-    parser.add_argument(
         "--min-epochs",
         type=int,
         default=20,
@@ -195,7 +189,6 @@ def main() -> None:
     print(f"Workers   : {args.num_workers}")
     print(f"Device    : {args.device or 'auto'}")
     print(f"Log every : {args.log_every} epochs")
-    print(f"Patience  : {args.patience if args.patience > 0 else 'disabled'}")
     print(f"Min epochs: {args.min_epochs}")
     print(f"LR        : {args.learning_rate}")
     print(f"W decay   : {args.weight_decay}")
@@ -223,7 +216,6 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         log_every=args.log_every,
-        patience=args.patience,
         min_epochs=args.min_epochs,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,

@@ -533,45 +533,6 @@ def _save_best_model(
     )
 
 
-class EarlyStopping:
-    """Stops training when the monitored value stops improving."""
-
-    def __init__(
-        self,
-        patience: int = 0,
-        min_delta: float = 0.0,
-        mode: str = "min",
-    ) -> None:
-        if mode not in {"min", "max"}:
-            raise ValueError(f"mode must be 'min' or 'max', got {mode!r}")
-        self.patience = patience
-        self.min_delta = min_delta
-        self.mode = mode
-        self._best = float("inf") if mode == "min" else float("-inf")
-        self._counter = 0
-
-    def step(self, value: float) -> bool:
-        improved = (
-            value < self._best - self.min_delta
-            if self.mode == "min"
-            else value > self._best + self.min_delta
-        )
-        if improved:
-            self._best = value
-            self._counter = 0
-            return True
-        self._counter += 1
-        return False
-
-    @property
-    def should_stop(self) -> bool:
-        return self.patience > 0 and self._counter >= self.patience
-
-    @property
-    def best(self) -> float:
-        return self._best
-
-
 def train_model(
     model: ACRNN,
     train_loader: DataLoader,
@@ -579,7 +540,6 @@ def train_model(
     device: torch.device,
     epochs: int = 200,
     log_every: int = 1,
-    patience: int = 15,
     min_epochs: int = 20,
     learning_rate: float = 2e-4,
     weight_decay: float = 1e-2,
@@ -635,7 +595,6 @@ def train_model(
             optimizer,
             mode="max" if val_loader is not None else "min",
             factor=0.5,
-            patience=6,
             min_lr=1e-5,
         )
     else:
@@ -643,10 +602,6 @@ def train_model(
             f"scheduler_name must be one of ['none', 'cosine', 'plateau'], got {scheduler_name!r}"
         )
 
-    early_stopping = EarlyStopping(
-        patience=patience,
-        mode="max" if val_loader is not None else "min",
-    )
     best_state_dict = deepcopy(model.state_dict())
     best_threshold = 0.5
     best_epoch = 0
@@ -746,11 +701,7 @@ def train_model(
                 f"{best_mark}"
             )
 
-        if early_stopping.should_stop and (epoch + 1) >= min_epochs:
-            print(
-                f"  Early stopping at epoch {epoch + 1} because the monitored value did not improve for {patience} epochs."
-            )
-            break
+
 
     return TrainResult(
         state_dict=best_state_dict,
@@ -794,7 +745,6 @@ def cross_validate_model(
     batch_size: int = 16,
     num_workers: int = 0,
     log_every: int = 1,
-    patience: int = 15,
     min_epochs: int = 20,
     learning_rate: float = 2e-4,
     weight_decay: float = 1e-2,
@@ -877,7 +827,6 @@ def cross_validate_model(
             training_device,
             epochs=epochs,
             log_every=log_every,
-            patience=patience,
             min_epochs=min_epochs,
             learning_rate=learning_rate,
             weight_decay=weight_decay,
