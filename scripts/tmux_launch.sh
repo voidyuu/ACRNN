@@ -36,7 +36,10 @@ fi
 
 SESSION_NAME="${SESSION_PREFIX}"
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
-    SESSION_NAME="${SESSION_PREFIX}_$(date +%Y%m%d_%H%M%S)"
+    create_window "$SESSION_NAME" "$WINDOW_NAME" "$@"
+    echo "Started tmux window '$WINDOW_NAME' in existing session '$SESSION_NAME'."
+    echo "Attach with: tmux attach -t $SESSION_NAME"
+    exit 0
 fi
 
 tmux new-session -d -s "$SESSION_NAME" -n "$WINDOW_NAME" "$(printf '%q ' "$@")"
