@@ -91,12 +91,6 @@ def parse_args() -> argparse.Namespace:
         help="Print metrics every N epochs (default: 5)",
     )
     parser.add_argument(
-        "--min-epochs",
-        type=int,
-        default=20,
-        help="Minimum epochs to run before early stopping can trigger (default: 20)",
-    )
-    parser.add_argument(
         "--learning-rate",
         type=float,
         default=2e-4,
@@ -189,7 +183,6 @@ def main() -> None:
     print(f"Workers   : {args.num_workers}")
     print(f"Device    : {args.device or 'auto'}")
     print(f"Log every : {args.log_every} epochs")
-    print(f"Min epochs: {args.min_epochs}")
     print(f"LR        : {args.learning_rate}")
     print(f"W decay   : {args.weight_decay}")
     print(f"Optim     : {args.optimizer}")
@@ -216,7 +209,6 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         log_every=args.log_every,
-        min_epochs=args.min_epochs,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         optimizer_name=args.optimizer,

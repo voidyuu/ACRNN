@@ -540,7 +540,6 @@ def train_model(
     device: torch.device,
     epochs: int = 200,
     log_every: int = 1,
-    min_epochs: int = 20,
     learning_rate: float = 2e-4,
     weight_decay: float = 1e-2,
     optimizer_name: str = "adamw",
@@ -605,6 +604,7 @@ def train_model(
     best_state_dict = deepcopy(model.state_dict())
     best_threshold = 0.5
     best_epoch = 0
+    best_score = float("-inf") if val_loader is not None else float("inf")
 
     epoch_w = len(str(epochs))
     dataset_size = len(train_loader.dataset)  # type: ignore[arg-type]
@@ -665,8 +665,13 @@ def train_model(
         elif scheduler is not None:
             scheduler.step()
 
-        is_best = early_stopping.step(monitor_value)
+        is_best = (
+            monitor_value > best_score
+            if val_loader is not None
+            else monitor_value < best_score
+        )
         if is_best:
+            best_score = monitor_value
             best_state_dict = deepcopy(model.state_dict())
             if val_result is not None:
                 best_threshold = val_result.decision_threshold
@@ -686,9 +691,9 @@ def train_model(
                 else ""
             )
             best_metric_text = (
-                f" | Best Score: {early_stopping.best:.4f}"
+                f" | Best Score: {best_score:.4f}"
                 if val_result is not None
-                else f" | Best Loss: {early_stopping.best:.4f}"
+                else f" | Best Loss: {best_score:.4f}"
             )
             print(
                 f"  Epoch {epoch + 1:{epoch_w}d}/{epochs}"
@@ -701,13 +706,11 @@ def train_model(
                 f"{best_mark}"
             )
 
-
-
     return TrainResult(
         state_dict=best_state_dict,
         decision_threshold=best_threshold,
         best_epoch=best_epoch,
-        best_score=early_stopping.best,
+        best_score=best_score,
     )
 
 
@@ -745,7 +748,6 @@ def cross_validate_model(
     batch_size: int = 16,
     num_workers: int = 0,
     log_every: int = 1,
-    min_epochs: int = 20,
     learning_rate: float = 2e-4,
     weight_decay: float = 1e-2,
     optimizer_name: str = "adamw",
@@ -827,7 +829,6 @@ def cross_validate_model(
             training_device,
             epochs=epochs,
             log_every=log_every,
-            min_epochs=min_epochs,
             learning_rate=learning_rate,
             weight_decay=weight_decay,
             optimizer_name=optimizer_name,

@@ -246,7 +246,6 @@ if [ "$USE_FAST_PRESET" -eq 1 ]; then
         --grad-clip 1.0
         --threshold-min-precision 0.65
         --threshold-min-recall 0.65
-        --min-epochs 10
         --log-every 5
         --num-workers 0
     )
@@ -263,7 +262,6 @@ else
         --grad-clip 1.0
         --threshold-min-precision 0.65
         --threshold-min-recall 0.65
-        --min-epochs 20
         --log-every 10
         --num-workers 0
     )
