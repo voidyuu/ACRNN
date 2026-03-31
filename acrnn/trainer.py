@@ -259,9 +259,13 @@ def _compute_balanced_class_weights(
     return weights
 
 
-def _score_metrics(metrics: EvalMetrics) -> float:
-    # Keep accuracy primary while still penalising collapse through F1.
-    return (metrics.accuracy * 0.75) + (metrics.f1 * 0.25)
+def _score_eval_result(result: EvalResult) -> float:
+    confusion = result.confusion_matrix
+    tn, fp = int(confusion[0, 0]), int(confusion[0, 1])
+    fn, tp = int(confusion[1, 0]), int(confusion[1, 1])
+    true_negative_rate = _safe_divide(float(tn), float(tn + fp))
+    true_positive_rate = _safe_divide(float(tp), float(tp + fn))
+    return (true_negative_rate + true_positive_rate) / 2.0
 
 
 def _predict_from_probabilities(
@@ -334,7 +338,7 @@ def _select_decision_threshold(
             targets,
             decision_threshold=float(threshold),
         )
-        score = _score_metrics(result.metrics)
+        score = _score_eval_result(result)
         if score > fallback_score:
             fallback_score = score
             fallback_result = result
@@ -656,7 +660,7 @@ def train_model(
                 loss=val_loss,
                 decision_threshold=tuned_val_result.decision_threshold,
             )
-            monitor_value = _score_metrics(val_result.metrics)
+            monitor_value = _score_eval_result(val_result)
         else:
             monitor_value = avg_loss
 
