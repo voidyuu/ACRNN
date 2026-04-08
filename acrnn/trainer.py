@@ -29,7 +29,6 @@ from .utils import make_timestamp_label, resolve_device
 
 VALID_MODES = {"subject_dependent", "subject_independent"}
 METRIC_NAMES = ("accuracy", "precision", "recall", "f1")
-VALID_CLASS_WEIGHTING = {"none", "balanced"}
 
 
 @dataclass(frozen=True)
@@ -235,37 +234,9 @@ def _make_metric_store() -> dict[str, list[float]]:
     return {name: [] for name in METRIC_NAMES}
 
 
-def _compute_balanced_class_weights(
-    train_loader: DataLoader,
-    num_labels: int = 2,
-) -> torch.Tensor | None:
-    dataset = train_loader.dataset  # type: ignore[assignment]
-    labels = getattr(dataset, "labels", None)
-
-    if labels is None:
-        counts = torch.zeros(num_labels, dtype=torch.float32)
-        for _, yb in train_loader:
-            counts += torch.bincount(yb.to(torch.long), minlength=num_labels).to(torch.float32)
-    else:
-        label_tensor = torch.as_tensor(labels, dtype=torch.long)
-        counts = torch.bincount(label_tensor, minlength=num_labels).to(torch.float32)
-
-    nonzero = counts > 0
-    if nonzero.sum().item() < 2:
-        return None
-
-    weights = torch.ones(num_labels, dtype=torch.float32)
-    weights[nonzero] = counts[nonzero].sum() / (float(nonzero.sum().item()) * counts[nonzero])
-    return weights
-
-
-def _score_eval_result(result: EvalResult) -> float:
-    confusion = result.confusion_matrix
-    tn, fp = int(confusion[0, 0]), int(confusion[0, 1])
-    fn, tp = int(confusion[1, 0]), int(confusion[1, 1])
-    true_negative_rate = _safe_divide(float(tn), float(tn + fp))
-    true_positive_rate = _safe_divide(float(tp), float(tp + fn))
-    return (true_negative_rate + true_positive_rate) / 2.0
+def _score_metrics(metrics: EvalMetrics) -> float:
+    # Keep accuracy primary while still penalising collapse through F1.
+    return (metrics.accuracy * 0.75) + (metrics.f1 * 0.25)
 
 
 def _predict_from_probabilities(
@@ -338,7 +309,7 @@ def _select_decision_threshold(
             targets,
             decision_threshold=float(threshold),
         )
-        score = _score_eval_result(result)
+        score = _score_metrics(result.metrics)
         if score > fallback_score:
             fallback_score = score
             fallback_result = result
@@ -537,6 +508,45 @@ def _save_best_model(
     )
 
 
+class EarlyStopping:
+    """Stops training when the monitored value stops improving."""
+
+    def __init__(
+        self,
+        patience: int = 0,
+        min_delta: float = 0.0,
+        mode: str = "min",
+    ) -> None:
+        if mode not in {"min", "max"}:
+            raise ValueError(f"mode must be 'min' or 'max', got {mode!r}")
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self._best = float("inf") if mode == "min" else float("-inf")
+        self._counter = 0
+
+    def step(self, value: float) -> bool:
+        improved = (
+            value < self._best - self.min_delta
+            if self.mode == "min"
+            else value > self._best + self.min_delta
+        )
+        if improved:
+            self._best = value
+            self._counter = 0
+            return True
+        self._counter += 1
+        return False
+
+    @property
+    def should_stop(self) -> bool:
+        return self.patience > 0 and self._counter >= self.patience
+
+    @property
+    def best(self) -> float:
+        return self._best
+
+
 def train_model(
     model: ACRNN,
     train_loader: DataLoader,
@@ -544,6 +554,8 @@ def train_model(
     device: torch.device,
     epochs: int = 200,
     log_every: int = 1,
+    patience: int = 15,
+    min_epochs: int = 20,
     learning_rate: float = 2e-4,
     weight_decay: float = 1e-2,
     optimizer_name: str = "adamw",
@@ -551,27 +563,8 @@ def train_model(
     grad_clip_norm: float = 1.0,
     threshold_min_precision: float = 0.65,
     threshold_min_recall: float = 0.65,
-    class_weighting: str = "balanced",
 ) -> TrainResult:
-    if class_weighting not in VALID_CLASS_WEIGHTING:
-        raise ValueError(
-            f"class_weighting must be one of {sorted(VALID_CLASS_WEIGHTING)}, got {class_weighting!r}"
-        )
-
-    criterion_weights = (
-        _compute_balanced_class_weights(train_loader)
-        if class_weighting == "balanced"
-        else None
-    )
-    criterion = nn.CrossEntropyLoss(
-        weight=criterion_weights.to(device) if criterion_weights is not None else None
-    )
-
-    if criterion_weights is not None:
-        weights_text = ", ".join(f"{float(weight):.4f}" for weight in criterion_weights)
-        print(f"  Class weights: [{weights_text}]")
-    elif class_weighting == "balanced":
-        print("  Class weights: skipped (training fold contains a single class)")
+    criterion = nn.CrossEntropyLoss()
 
     if optimizer_name == "adam":
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -598,6 +591,7 @@ def train_model(
             optimizer,
             mode="max" if val_loader is not None else "min",
             factor=0.5,
+            patience=6,
             min_lr=1e-5,
         )
     else:
@@ -605,10 +599,13 @@ def train_model(
             f"scheduler_name must be one of ['none', 'cosine', 'plateau'], got {scheduler_name!r}"
         )
 
+    early_stopping = EarlyStopping(
+        patience=patience,
+        mode="max" if val_loader is not None else "min",
+    )
     best_state_dict = deepcopy(model.state_dict())
     best_threshold = 0.5
     best_epoch = 0
-    best_score = float("-inf") if val_loader is not None else float("inf")
 
     epoch_w = len(str(epochs))
     dataset_size = len(train_loader.dataset)  # type: ignore[arg-type]
@@ -660,7 +657,7 @@ def train_model(
                 loss=val_loss,
                 decision_threshold=tuned_val_result.decision_threshold,
             )
-            monitor_value = _score_eval_result(val_result)
+            monitor_value = _score_metrics(val_result.metrics)
         else:
             monitor_value = avg_loss
 
@@ -669,13 +666,8 @@ def train_model(
         elif scheduler is not None:
             scheduler.step()
 
-        is_best = (
-            monitor_value > best_score
-            if val_loader is not None
-            else monitor_value < best_score
-        )
+        is_best = early_stopping.step(monitor_value)
         if is_best:
-            best_score = monitor_value
             best_state_dict = deepcopy(model.state_dict())
             if val_result is not None:
                 best_threshold = val_result.decision_threshold
@@ -695,9 +687,9 @@ def train_model(
                 else ""
             )
             best_metric_text = (
-                f" | Best Score: {best_score:.4f}"
+                f" | Best Score: {early_stopping.best:.4f}"
                 if val_result is not None
-                else f" | Best Loss: {best_score:.4f}"
+                else f" | Best Loss: {early_stopping.best:.4f}"
             )
             print(
                 f"  Epoch {epoch + 1:{epoch_w}d}/{epochs}"
@@ -710,11 +702,17 @@ def train_model(
                 f"{best_mark}"
             )
 
+        if early_stopping.should_stop and (epoch + 1) >= min_epochs:
+            print(
+                f"  Early stopping at epoch {epoch + 1} because the monitored value did not improve for {patience} epochs."
+            )
+            break
+
     return TrainResult(
         state_dict=best_state_dict,
         decision_threshold=best_threshold,
         best_epoch=best_epoch,
-        best_score=best_score,
+        best_score=early_stopping.best,
     )
 
 
@@ -752,6 +750,8 @@ def cross_validate_model(
     batch_size: int = 16,
     num_workers: int = 0,
     log_every: int = 1,
+    patience: int = 15,
+    min_epochs: int = 20,
     learning_rate: float = 2e-4,
     weight_decay: float = 1e-2,
     optimizer_name: str = "adamw",
@@ -761,7 +761,6 @@ def cross_validate_model(
     normalization: str = "channel",
     threshold_min_precision: float = 0.65,
     threshold_min_recall: float = 0.65,
-    class_weighting: str = "balanced",
     seed: int = 42,
     save_dir: str | None = "checkpoints",
 ) -> tuple[float, float]:
@@ -833,6 +832,8 @@ def cross_validate_model(
             training_device,
             epochs=epochs,
             log_every=log_every,
+            patience=patience,
+            min_epochs=min_epochs,
             learning_rate=learning_rate,
             weight_decay=weight_decay,
             optimizer_name=optimizer_name,
@@ -840,7 +841,6 @@ def cross_validate_model(
             grad_clip_norm=grad_clip_norm,
             threshold_min_precision=threshold_min_precision,
             threshold_min_recall=threshold_min_recall,
-            class_weighting=class_weighting,
         )
         model.load_state_dict(train_result.state_dict)
 

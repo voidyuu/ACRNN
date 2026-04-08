@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from .split import DataSplit, split_grouped_train_indices
+from .split import DataSplit
 
 
 class ArrayDataset(Dataset):
@@ -23,10 +23,6 @@ class ArrayDataset(Dataset):
 
     def __len__(self) -> int:
         return len(self._y)
-
-    @property
-    def labels(self) -> np.ndarray:
-        return self._y
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         x = torch.tensor(self._X[idx], dtype=torch.float32)
@@ -48,22 +44,12 @@ def _split_train_indices(
     y: np.ndarray,
     validation_split: float,
     seed: int,
-    groups: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray | None]:
     if validation_split <= 0.0:
         return train_idx, None
     if not 0.0 < validation_split < 1.0:
         raise ValueError(
             f"validation_split must be in [0, 1), got {validation_split}"
-        )
-
-    if groups is not None:
-        return split_grouped_train_indices(
-            train_idx=train_idx,
-            y=y,
-            groups=groups,
-            validation_split=validation_split,
-            seed=seed,
         )
 
     train_labels = y[train_idx]
@@ -119,7 +105,6 @@ def build_dataloaders(
     X: np.ndarray,
     y: np.ndarray,
     split: DataSplit,
-    groups: np.ndarray | None = None,
     batch_size: int = 32,
     num_workers: int = 0,
     validation_split: float = 0.0,
@@ -135,7 +120,6 @@ def build_dataloaders(
         y,
         validation_split=validation_split,
         seed=seed,
-        groups=groups,
     )
 
     train_X = X[train_idx]

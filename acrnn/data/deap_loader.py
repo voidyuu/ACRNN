@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from ..config import DEAP_CACHE_DIR, DEAP_TARGETS, get_default_threshold
 from .loaders import LoaderBundle, build_dataloaders
-from .split import DataSplit, build_group_stratified_kfold_splits
+from .split import DataSplit, build_kfold_splits
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -30,9 +30,6 @@ DEAP_SFREQ: float = 128.0
 
 #: Number of EEG channels retained after preprocessing.
 DEAP_N_CHANNELS: int = 32
-
-#: Number of emotion-eliciting trials per subject.
-DEAP_N_TRIALS: int = 40
 
 #: Mapping from target name to its column index in the ``y_raw`` array.
 _LABEL_COL: dict[str, int] = {target: idx for idx, target in enumerate(DEAP_TARGETS)}
@@ -65,22 +62,6 @@ def _binarise(
     return (y_raw_col >= threshold).astype(np.int64)
 
 
-def _build_trial_groups(
-    num_windows: int,
-    num_trials: int,
-    group_offset: int = 0,
-) -> np.ndarray:
-    if num_windows % num_trials != 0:
-        raise ValueError(
-            "Expected the number of cached windows to be divisible by the number "
-            f"of trials, got num_windows={num_windows}, num_trials={num_trials}"
-        )
-
-    windows_per_trial = num_windows // num_trials
-    trial_groups = np.repeat(np.arange(num_trials, dtype=np.int64), windows_per_trial)
-    return trial_groups + group_offset
-
-
 # ── Public array-loading API ──────────────────────────────────────────────────
 
 
@@ -89,8 +70,7 @@ def load_deap_arrays(
     subject_ids: list[int] | None = None,
     cache_dir: str | Path = DEAP_CACHE_DIR,
     threshold: float | None = None,
-    return_groups: bool = False,
-) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     if target not in VALID_TARGETS:
         raise ValueError(
             f"target must be one of {sorted(VALID_TARGETS)}, got {target!r}"
@@ -110,28 +90,14 @@ def load_deap_arrays(
     col = _LABEL_COL[target]
     X_parts: list[np.ndarray] = []
     y_parts: list[np.ndarray] = []
-    group_parts: list[np.ndarray] = []
-    group_offset = 0
 
     for sid in ids:
         X_sub, y_raw_sub = _load_subject_cache(sid, cache_dir)
         X_parts.append(X_sub)
         y_parts.append(_binarise(y_raw_sub[:, col], threshold))
-        if return_groups:
-            group_parts.append(
-                _build_trial_groups(
-                    num_windows=len(X_sub),
-                    num_trials=DEAP_N_TRIALS,
-                    group_offset=group_offset,
-                )
-            )
-            group_offset += DEAP_N_TRIALS
 
     X = np.concatenate(X_parts, axis=0)
     y = np.concatenate(y_parts, axis=0)
-    if return_groups:
-        groups = np.concatenate(group_parts, axis=0)
-        return X, y, groups
     return X, y
 
 
@@ -236,19 +202,11 @@ class DeapDataloader:
 
         # Load training and test data separately, then concatenate so that
         # build_dataloaders can index into a single array pair.
-        X_train, y_train, train_groups = load_deap_arrays(
-            target,
-            train_subject_ids,
-            cache_dir,
-            threshold,
-            return_groups=True,
+        X_train, y_train = load_deap_arrays(
+            target, train_subject_ids, cache_dir, threshold
         )
-        X_test, y_test, test_groups = load_deap_arrays(
-            target,
-            [test_subject_id],
-            cache_dir,
-            threshold,
-            return_groups=True,
+        X_test, y_test = load_deap_arrays(
+            target, [test_subject_id], cache_dir, threshold
         )
 
         n_train = len(y_train)
@@ -256,13 +214,6 @@ class DeapDataloader:
 
         X_all = np.concatenate([X_train, X_test], axis=0)
         y_all = np.concatenate([y_train, y_test], axis=0)
-        groups_all = np.concatenate(
-            [
-                train_groups,
-                test_groups + (int(train_groups.max()) + 1 if len(train_groups) > 0 else 0),
-            ],
-            axis=0,
-        )
 
         split = DataSplit(
             train_idx=np.arange(n_train),
@@ -273,7 +224,6 @@ class DeapDataloader:
             X_all,
             y_all,
             split,
-            groups=groups_all,
             batch_size=batch_size,
             num_workers=num_workers,
             validation_split=validation_split,
@@ -315,24 +265,17 @@ class DeapDataloader:
                 f"subject_dependent mode with n_folds={n_folds}, got {fold}"
             )
 
-        X_all, y_all, groups = load_deap_arrays(
-            target,
-            [subject_id],
-            cache_dir,
-            threshold,
-            return_groups=True,
-        )
+        X_all, y_all = load_deap_arrays(target, [subject_id], cache_dir, threshold)
 
-        # Keep entire trials together so windows from one trial cannot leak
-        # across train/validation/test partitions.
-        splits = build_group_stratified_kfold_splits(y_all, groups, k=n_folds, seed=seed)
+        # build_kfold_splits returns a list of DataSplit objects; pick the
+        # requested fold.
+        splits = build_kfold_splits(len(y_all), k=n_folds)
         split = splits[fold]
 
         bundle: LoaderBundle = build_dataloaders(
             X_all,
             y_all,
             split,
-            groups=groups,
             batch_size=batch_size,
             num_workers=num_workers,
             validation_split=validation_split,

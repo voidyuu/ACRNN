@@ -91,6 +91,18 @@ def parse_args() -> argparse.Namespace:
         help="Print metrics every N epochs (default: 5)",
     )
     parser.add_argument(
+        "--patience",
+        type=int,
+        default=15,
+        help="Early stopping patience in epochs (default: 15)",
+    )
+    parser.add_argument(
+        "--min-epochs",
+        type=int,
+        default=20,
+        help="Minimum epochs to run before early stopping can trigger (default: 20)",
+    )
+    parser.add_argument(
         "--learning-rate",
         type=float,
         default=2e-4,
@@ -145,12 +157,6 @@ def parse_args() -> argparse.Namespace:
         help="Minimum validation recall when scanning decision thresholds (default: 0.65)",
     )
     parser.add_argument(
-        "--class-weighting",
-        choices=["none", "balanced"],
-        default="balanced",
-        help="Loss weighting strategy derived from the training-fold class balance (default: balanced)",
-    )
-    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -183,6 +189,8 @@ def main() -> None:
     print(f"Workers   : {args.num_workers}")
     print(f"Device    : {args.device or 'auto'}")
     print(f"Log every : {args.log_every} epochs")
+    print(f"Patience  : {args.patience if args.patience > 0 else 'disabled'}")
+    print(f"Min epochs: {args.min_epochs}")
     print(f"LR        : {args.learning_rate}")
     print(f"W decay   : {args.weight_decay}")
     print(f"Optim     : {args.optimizer}")
@@ -191,7 +199,6 @@ def main() -> None:
     print(f"Val split : {args.validation_split}")
     print(f"Norm      : {args.normalization}")
     print(f"Thr floor : prec>={args.threshold_min_precision}, rec>={args.threshold_min_recall}")
-    print(f"Cls weight: {args.class_weighting}")
     print(f"Seed      : {args.seed}")
     print(f"Save dir  : {args.save_dir or '(disabled)'}")
     print()
@@ -209,6 +216,8 @@ def main() -> None:
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         log_every=args.log_every,
+        patience=args.patience,
+        min_epochs=args.min_epochs,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         optimizer_name=args.optimizer,
@@ -218,7 +227,6 @@ def main() -> None:
         normalization=args.normalization,
         threshold_min_precision=args.threshold_min_precision,
         threshold_min_recall=args.threshold_min_recall,
-        class_weighting=args.class_weighting,
         seed=args.seed,
         save_dir=args.save_dir or None,
     )
