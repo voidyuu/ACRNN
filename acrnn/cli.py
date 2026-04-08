@@ -157,6 +157,18 @@ def parse_args() -> argparse.Namespace:
         help="Minimum validation recall when scanning decision thresholds (default: 0.65)",
     )
     parser.add_argument(
+        "--train-sampling",
+        choices=["shuffle", "balanced"],
+        default="balanced",
+        help="Training-set sampling strategy (default: balanced)",
+    )
+    parser.add_argument(
+        "--loss-class-weighting",
+        choices=["none", "balanced"],
+        default="balanced",
+        help="Class weighting strategy for the training loss (default: balanced)",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -199,6 +211,8 @@ def main() -> None:
     print(f"Val split : {args.validation_split}")
     print(f"Norm      : {args.normalization}")
     print(f"Thr floor : prec>={args.threshold_min_precision}, rec>={args.threshold_min_recall}")
+    print(f"Sampling  : {args.train_sampling}")
+    print(f"Loss wts  : {args.loss_class_weighting}")
     print(f"Seed      : {args.seed}")
     print(f"Save dir  : {args.save_dir or '(disabled)'}")
     print()
@@ -227,6 +241,8 @@ def main() -> None:
         normalization=args.normalization,
         threshold_min_precision=args.threshold_min_precision,
         threshold_min_recall=args.threshold_min_recall,
+        train_sampling=args.train_sampling,
+        loss_class_weighting=args.loss_class_weighting,
         seed=args.seed,
         save_dir=args.save_dir or None,
     )

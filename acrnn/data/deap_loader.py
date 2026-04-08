@@ -127,6 +127,7 @@ class DeapDataloader:
         num_workers: int = 0,
         validation_split: float = 0.0,
         normalization: str = "none",
+        train_sampling: str = "balanced",
         seed: int = 42,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None = None,
     ) -> None:
@@ -155,6 +156,7 @@ class DeapDataloader:
                 num_workers=num_workers,
                 validation_split=validation_split,
                 normalization=normalization,
+                train_sampling=train_sampling,
                 seed=seed,
                 dataset_factory=dataset_factory,
             )
@@ -170,6 +172,7 @@ class DeapDataloader:
                 num_workers=num_workers,
                 validation_split=validation_split,
                 normalization=normalization,
+                train_sampling=train_sampling,
                 seed=seed,
                 dataset_factory=dataset_factory,
             )
@@ -186,6 +189,7 @@ class DeapDataloader:
         num_workers: int,
         validation_split: float,
         normalization: str,
+        train_sampling: str,
         seed: int,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None,
     ) -> None:
@@ -229,6 +233,7 @@ class DeapDataloader:
             validation_split=validation_split,
             seed=seed,
             normalization=normalization,
+            train_sampling=train_sampling,
             dataset_factory=dataset_factory,
         )
         self.train = bundle.train
@@ -247,6 +252,7 @@ class DeapDataloader:
         num_workers: int,
         validation_split: float,
         normalization: str,
+        train_sampling: str,
         seed: int,
         dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None,
     ) -> None:
@@ -281,6 +287,7 @@ class DeapDataloader:
             validation_split=validation_split,
             seed=seed,
             normalization=normalization,
+            train_sampling=train_sampling,
             dataset_factory=dataset_factory,
         )
         self.train = bundle.train

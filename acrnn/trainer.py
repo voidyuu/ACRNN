@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from .config import VALID_DATASETS, get_default_threshold
 from .data import (
@@ -151,6 +151,7 @@ def _build_dataloader(
     num_workers: int,
     validation_split: float,
     normalization: str,
+    train_sampling: str,
     seed: int,
 ) -> DeapDataloader | DreamerDataloader:
     kwargs: dict[str, object] = {
@@ -162,6 +163,7 @@ def _build_dataloader(
         "num_workers": num_workers,
         "validation_split": validation_split,
         "normalization": normalization,
+        "train_sampling": train_sampling,
         "seed": seed,
     }
     if cache_dir is not None:
@@ -235,8 +237,51 @@ def _make_metric_store() -> dict[str, list[float]]:
 
 
 def _score_metrics(metrics: EvalMetrics) -> float:
-    # Keep accuracy primary while still penalising collapse through F1.
-    return (metrics.accuracy * 0.75) + (metrics.f1 * 0.25)
+    # Balance all four headline metrics while keeping accuracy slightly primary.
+    return (
+        (metrics.accuracy * 0.35)
+        + (metrics.precision * 0.2)
+        + (metrics.recall * 0.2)
+        + (metrics.f1 * 0.25)
+    )
+
+
+def _extract_dataset_labels(dataset: Dataset) -> torch.Tensor | None:
+    labels = getattr(dataset, "_y", None)
+    if labels is not None:
+        return torch.as_tensor(labels, dtype=torch.long)
+
+    extracted: list[int] = []
+    for idx in range(len(dataset)):
+        item = dataset[idx]
+        if not isinstance(item, tuple) or len(item) != 2:
+            return None
+        label = item[1]
+        if isinstance(label, torch.Tensor):
+            extracted.append(int(label.item()))
+        else:
+            extracted.append(int(label))
+    return torch.as_tensor(extracted, dtype=torch.long)
+
+
+def _build_class_weight_tensor(
+    dataset: Dataset,
+    device: torch.device,
+) -> torch.Tensor | None:
+    labels = _extract_dataset_labels(dataset)
+    if labels is None or labels.numel() == 0:
+        return None
+
+    class_counts = torch.bincount(labels, minlength=2).to(torch.float32)
+    valid_classes = class_counts > 0
+    if int(valid_classes.sum().item()) < 2:
+        return None
+
+    class_weights = torch.zeros_like(class_counts)
+    class_weights[valid_classes] = labels.numel() / (
+        class_counts[valid_classes] * float(valid_classes.sum().item())
+    )
+    return class_weights.to(device)
 
 
 def _predict_from_probabilities(
@@ -563,8 +608,18 @@ def train_model(
     grad_clip_norm: float = 1.0,
     threshold_min_precision: float = 0.65,
     threshold_min_recall: float = 0.65,
+    loss_class_weighting: str = "balanced",
 ) -> TrainResult:
-    criterion = nn.CrossEntropyLoss()
+    if loss_class_weighting not in {"none", "balanced"}:
+        raise ValueError(
+            "loss_class_weighting must be one of ['none', 'balanced'], "
+            f"got {loss_class_weighting!r}"
+        )
+
+    class_weights = None
+    if loss_class_weighting == "balanced":
+        class_weights = _build_class_weight_tensor(train_loader.dataset, device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     if optimizer_name == "adam":
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -616,6 +671,7 @@ def train_model(
         model.train()
         epoch_loss = 0.0
         correct = 0
+        monitor_label = "loss"
 
         for xb, yb in train_loader:
             xb, yb = xb.to(device), yb.to(device)
@@ -657,7 +713,16 @@ def train_model(
                 loss=val_loss,
                 decision_threshold=tuned_val_result.decision_threshold,
             )
-            monitor_value = _score_metrics(val_result.metrics)
+            meets_metric_floor = (
+                val_result.metrics.precision >= threshold_min_precision
+                and val_result.metrics.recall >= threshold_min_recall
+            )
+            if meets_metric_floor:
+                monitor_value = _score_metrics(val_result.metrics)
+                monitor_label = "score"
+            else:
+                monitor_value = -(val_result.loss if val_result.loss is not None else avg_loss)
+                monitor_label = "val_loss"
         else:
             monitor_value = avg_loss
 
@@ -687,7 +752,7 @@ def train_model(
                 else ""
             )
             best_metric_text = (
-                f" | Best Score: {early_stopping.best:.4f}"
+                f" | Best {monitor_label}: {early_stopping.best:.4f}"
                 if val_result is not None
                 else f" | Best Loss: {early_stopping.best:.4f}"
             )
@@ -761,6 +826,8 @@ def cross_validate_model(
     normalization: str = "channel",
     threshold_min_precision: float = 0.65,
     threshold_min_recall: float = 0.65,
+    train_sampling: str = "balanced",
+    loss_class_weighting: str = "balanced",
     seed: int = 42,
     save_dir: str | None = "checkpoints",
 ) -> tuple[float, float]:
@@ -807,6 +874,7 @@ def cross_validate_model(
             num_workers=num_workers,
             validation_split=validation_split,
             normalization=normalization,
+            train_sampling=train_sampling,
             seed=seed + fold + (0 if run_subject_id is None else run_subject_id * 100),
         )
         num_channels, num_timepoints = _infer_input_shape(dl.train)
@@ -841,6 +909,7 @@ def cross_validate_model(
             grad_clip_norm=grad_clip_norm,
             threshold_min_precision=threshold_min_precision,
             threshold_min_recall=threshold_min_recall,
+            loss_class_weighting=loss_class_weighting,
         )
         model.load_state_dict(train_result.state_dict)
 
@@ -871,7 +940,7 @@ def cross_validate_model(
         for metric_name, metric_value in metrics.as_dict().items():
             subject_metric_store[metric_name].append(metric_value)
 
-        if best_run is None or metrics.accuracy > best_run[2].accuracy:
+        if best_run is None or _score_metrics(metrics) > _score_metrics(best_run[2]):
             best_run = (
                 run_subject_id,
                 fold,

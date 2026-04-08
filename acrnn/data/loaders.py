@@ -5,7 +5,7 @@ from typing import Callable
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 from .split import DataSplit
 
@@ -110,6 +110,7 @@ def build_dataloaders(
     validation_split: float = 0.0,
     seed: int = 42,
     normalization: str = "none",
+    train_sampling: str = "balanced",
     dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None = None,
 ) -> LoaderBundle:
     if dataset_factory is None:
@@ -140,10 +141,31 @@ def build_dataloaders(
             f"normalization must be 'none' or 'channel', got {normalization!r}"
         )
 
+    sampler = None
+    shuffle = True
+    if train_sampling == "balanced":
+        class_counts = np.bincount(train_y.astype(np.int64), minlength=2)
+        valid_classes = class_counts > 0
+        if valid_classes.sum() >= 2:
+            class_weights = np.zeros_like(class_counts, dtype=np.float64)
+            class_weights[valid_classes] = 1.0 / class_counts[valid_classes]
+            sample_weights = class_weights[train_y.astype(np.int64)]
+            sampler = WeightedRandomSampler(
+                weights=torch.as_tensor(sample_weights, dtype=torch.double),
+                num_samples=len(train_y),
+                replacement=True,
+            )
+            shuffle = False
+    elif train_sampling != "shuffle":
+        raise ValueError(
+            f"train_sampling must be 'shuffle' or 'balanced', got {train_sampling!r}"
+        )
+
     train = DataLoader(
         dataset_factory(train_X, train_y),
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=shuffle,
+        sampler=sampler,
         num_workers=num_workers,
     )
 

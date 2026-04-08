@@ -243,6 +243,8 @@ if [ "$USE_FAST_PRESET" -eq 1 ]; then
         --scheduler plateau
         --validation-split 0.1
         --normalization channel
+        --train-sampling balanced
+        --loss-class-weighting balanced
         --grad-clip 1.0
         --threshold-min-precision 0.65
         --threshold-min-recall 0.65
@@ -261,6 +263,8 @@ else
         --scheduler plateau
         --validation-split 0.1
         --normalization channel
+        --train-sampling balanced
+        --loss-class-weighting balanced
         --grad-clip 1.0
         --threshold-min-precision 0.65
         --threshold-min-recall 0.65
