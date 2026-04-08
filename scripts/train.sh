@@ -16,6 +16,9 @@ USE_FAST_PRESET=0
 PRESET_ARGS=()
 EXTRA_ARGS=()
 
+python_runner=()
+acrnn_runner=()
+
 print_help() {
     cat <<'EOF'
 Usage: scripts/train.sh [script-options] [acrnn-options]
@@ -28,7 +31,7 @@ Script options:
   --cache-dir PATH               Override cache dir for a single dataset
   --help                         Show this help message
 
-Any other arguments are forwarded to `uv run acrnn`.
+Any other arguments are forwarded to the `acrnn` CLI.
 
 This script is responsible for dataset/mode/target selection and automatic
 preprocessing. It also applies a training preset automatically.
@@ -92,9 +95,26 @@ read_lines_into_array() {
     done < <("$@")
 }
 
+resolve_runtime() {
+    if command -v uv >/dev/null 2>&1; then
+        python_runner=(uv run python)
+        acrnn_runner=(uv run acrnn)
+        return
+    fi
+
+    if [ -x "$SCRIPT_DIR/../.venv/bin/python" ] && [ -x "$SCRIPT_DIR/../.venv/bin/acrnn" ]; then
+        python_runner=("$SCRIPT_DIR/../.venv/bin/python")
+        acrnn_runner=("$SCRIPT_DIR/../.venv/bin/acrnn")
+        return
+    fi
+
+    echo "Unable to find a runnable environment. Install uv or create .venv with acrnn installed." >&2
+    exit 1
+}
+
 default_cache_dir_for_dataset() {
     local dataset="$1"
-    uv run python -c "from acrnn.config import get_default_cache_dir; print(get_default_cache_dir('$dataset'))"
+    "${python_runner[@]}" -c "from acrnn.config import get_default_cache_dir; print(get_default_cache_dir('$dataset'))"
 }
 
 read_config_tuple_into_array() {
@@ -110,7 +130,7 @@ read_config_tuple_into_array() {
     eval "$out_var=()"
     while IFS= read -r line; do
         eval "$out_var+=(\"\$line\")"
-    done < <(uv run python -c "$python_expr")
+    done < <("${python_runner[@]}" -c "$python_expr")
 }
 
 resolve_cache_dir() {
@@ -133,10 +153,10 @@ ensure_cache_ready() {
     echo "Cache for dataset '$dataset' is empty, running preprocessor..."
     case "$dataset" in
         deap)
-            uv run python -m acrnn.data.deap_preprocesser --cache-dir "$cache_dir"
+            "${python_runner[@]}" -m acrnn.data.deap_preprocesser --cache-dir "$cache_dir"
             ;;
         dreamer)
-            uv run python -m acrnn.data.dreamer_preprocesser --cache-dir "$cache_dir"
+            "${python_runner[@]}" -m acrnn.data.dreamer_preprocesser --cache-dir "$cache_dir"
             ;;
     esac
 }
@@ -283,6 +303,8 @@ if [ -n "$CACHE_DIR_OVERRIDE" ]; then
     fi
 fi
 
+resolve_runtime
+
 read_lines_into_array DATASETS expand_datasets
 read_lines_into_array MODES expand_modes
 
@@ -300,7 +322,7 @@ for dataset in "${DATASETS[@]}"; do
             echo "============================================================"
 
             cmd=(
-                uv run acrnn
+                "${acrnn_runner[@]}"
                 --dataset "$dataset"
                 --mode "$mode"
                 --target "$target"

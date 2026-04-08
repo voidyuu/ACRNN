@@ -42,6 +42,8 @@ def build_kfold_splits(
     k: int = 10,
     shuffle: bool = True,
     seed: int | None = 42,
+    labels: np.ndarray | None = None,
+    stratified: bool = False,
 ) -> list[DataSplit]:
     """Build *k* :class:`DataSplit` objects for k-fold cross-validation.
 
@@ -83,9 +85,45 @@ def build_kfold_splits(
     if num_examples < k:
         raise ValueError(f"num_examples ({num_examples}) must be >= k ({k})")
 
+    rng = np.random.default_rng(seed)
+
+    if stratified:
+        if labels is None:
+            raise ValueError("labels must be provided when stratified=True")
+        labels = np.asarray(labels)
+        if labels.shape[0] != num_examples:
+            raise ValueError(
+                f"labels length ({labels.shape[0]}) must match num_examples ({num_examples})"
+            )
+
+        fold_members: list[list[int]] = [[] for _ in range(k)]
+        for class_value in np.unique(labels):
+            class_indices = np.flatnonzero(labels == class_value)
+            if shuffle:
+                rng.shuffle(class_indices)
+
+            class_fold_sizes = np.full(k, len(class_indices) // k, dtype=int)
+            class_fold_sizes[: len(class_indices) % k] += 1
+
+            current = 0
+            for fold_idx, fold_size in enumerate(class_fold_sizes):
+                if fold_size == 0:
+                    continue
+                fold_members[fold_idx].extend(class_indices[current : current + fold_size].tolist())
+                current += fold_size
+
+        splits: list[DataSplit] = []
+        all_indices = np.arange(num_examples)
+        for fold_idx in range(k):
+            test_idx = np.asarray(fold_members[fold_idx], dtype=np.int64)
+            if shuffle and test_idx.size > 1:
+                rng.shuffle(test_idx)
+            train_idx = np.setdiff1d(all_indices, test_idx, assume_unique=False)
+            splits.append(DataSplit(train_idx=train_idx, test_idx=test_idx))
+        return splits
+
     indices = np.arange(num_examples)
     if shuffle:
-        rng = np.random.default_rng(seed)
         rng.shuffle(indices)
 
     # Distribute the remainder across the first (num_examples % k) folds.

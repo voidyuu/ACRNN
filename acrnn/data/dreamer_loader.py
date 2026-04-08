@@ -319,7 +319,13 @@ class DreamerDataloader:
 
         # build_kfold_splits returns a list of DataSplit objects; select
         # the requested fold.
-        splits = build_kfold_splits(len(y_all), k=n_folds)
+        splits = build_kfold_splits(
+            len(y_all),
+            k=n_folds,
+            seed=seed,
+            labels=y_all,
+            stratified=True,
+        )
         split = splits[fold]
 
         bundle: LoaderBundle = build_dataloaders(

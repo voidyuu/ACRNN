@@ -449,6 +449,7 @@ def _save_metrics(
     target: str,
     mode: str,
     overall_metrics: dict[str, dict[str, float]],
+    subject_metrics: dict[int, dict[str, dict[str, float]]],
     confusion_matrix: np.ndarray,
 ) -> None:
     if output_dir is None:
@@ -461,6 +462,9 @@ def _save_metrics(
         "target": target,
         "mode": mode,
         "overall_metrics": overall_metrics,
+        "subject_metrics": {
+            str(subject_id): metrics for subject_id, metrics in sorted(subject_metrics.items())
+        },
         "confusion_matrix": confusion_matrix.tolist(),
     }
     metrics_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
@@ -1001,6 +1005,10 @@ def cross_validate_model(
         target=target,
         mode=mode,
         overall_metrics=overall_metrics,
+        subject_metrics={
+            subject_id: _summarise_metric_store(metric_store)
+            for subject_id, metric_store in subject_scores.items()
+        },
         confusion_matrix=overall_confusion_matrix,
     )
     _save_confusion_matrix_plot(
