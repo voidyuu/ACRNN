@@ -35,53 +35,7 @@ class ArrayDataset(Dataset):
 @dataclass(frozen=True)
 class LoaderBundle:
     train: DataLoader
-    val: DataLoader | None
     test: DataLoader | None
-
-
-def _split_train_indices(
-    train_idx: np.ndarray,
-    y: np.ndarray,
-    validation_split: float,
-    seed: int,
-) -> tuple[np.ndarray, np.ndarray | None]:
-    if validation_split <= 0.0:
-        return train_idx, None
-    if not 0.0 < validation_split < 1.0:
-        raise ValueError(
-            f"validation_split must be in [0, 1), got {validation_split}"
-        )
-
-    train_labels = y[train_idx]
-    class_values = np.unique(train_labels)
-    rng = np.random.default_rng(seed)
-
-    train_parts: list[np.ndarray] = []
-    val_parts: list[np.ndarray] = []
-
-    for class_value in class_values:
-        class_members = train_idx[train_labels == class_value].copy()
-        rng.shuffle(class_members)
-
-        if len(class_members) < 2:
-            train_parts.append(class_members)
-            continue
-
-        val_size = int(round(len(class_members) * validation_split))
-        val_size = max(1, min(len(class_members) - 1, val_size))
-
-        val_parts.append(class_members[:val_size])
-        train_parts.append(class_members[val_size:])
-
-    inner_train_idx = np.concatenate(train_parts)
-    rng.shuffle(inner_train_idx)
-
-    if not val_parts:
-        return inner_train_idx, None
-
-    val_idx = np.concatenate(val_parts)
-    rng.shuffle(val_idx)
-    return inner_train_idx, val_idx
 
 
 def _apply_channel_standardization(
@@ -107,33 +61,25 @@ def build_dataloaders(
     split: DataSplit,
     batch_size: int = 32,
     num_workers: int = 0,
-    validation_split: float = 0.0,
     seed: int = 42,
     normalization: str = "none",
     train_sampling: str = "balanced",
     dataset_factory: Callable[[np.ndarray, np.ndarray], Dataset] | None = None,
 ) -> LoaderBundle:
+    del seed
+
     if dataset_factory is None:
         dataset_factory = lambda features, labels: ArrayDataset(features, labels)
 
-    train_idx, val_idx = _split_train_indices(
-        split.train_idx,
-        y,
-        validation_split=validation_split,
-        seed=seed,
-    )
-
-    train_X = X[train_idx]
-    train_y = y[train_idx]
-    val_X = X[val_idx] if val_idx is not None else None
-    val_y = y[val_idx] if val_idx is not None else None
+    train_X = X[split.train_idx]
+    train_y = y[split.train_idx]
     test_X = X[split.test_idx] if split.test_idx is not None else None
     test_y = y[split.test_idx] if split.test_idx is not None else None
 
     if normalization == "channel":
-        train_X, val_X, test_X = _apply_channel_standardization(
+        train_X, test_X = _apply_channel_standardization(
             train_X,
-            [train_X, val_X, test_X],
+            [train_X, test_X],
         )
         assert train_X is not None
     elif normalization != "none":
@@ -169,15 +115,6 @@ def build_dataloaders(
         num_workers=num_workers,
     )
 
-    val: DataLoader | None = None
-    if val_X is not None and val_y is not None:
-        val = DataLoader(
-            dataset_factory(val_X, val_y),
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-        )
-
     test: DataLoader | None = None
     if test_X is not None and test_y is not None:
         test = DataLoader(
@@ -187,4 +124,4 @@ def build_dataloaders(
             num_workers=num_workers,
         )
 
-    return LoaderBundle(train=train, val=val, test=test)
+    return LoaderBundle(train=train, test=test)

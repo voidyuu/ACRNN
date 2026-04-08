@@ -108,9 +108,6 @@ class DeapDataloader:
     #: DataLoader for the training partition.
     train: DataLoader
 
-    #: DataLoader for the validation partition (``None`` when disabled).
-    val: DataLoader | None
-
     #: DataLoader for the test partition (``None`` when no test set exists).
     test: DataLoader | None
 
@@ -125,7 +122,6 @@ class DeapDataloader:
         cache_dir: str | Path = DEAP_CACHE_DIR,
         batch_size: int = 32,
         num_workers: int = 0,
-        validation_split: float = 0.0,
         normalization: str = "none",
         train_sampling: str = "balanced",
         seed: int = 42,
@@ -154,7 +150,6 @@ class DeapDataloader:
                 cache_dir=cache_dir,
                 batch_size=batch_size,
                 num_workers=num_workers,
-                validation_split=validation_split,
                 normalization=normalization,
                 train_sampling=train_sampling,
                 seed=seed,
@@ -170,7 +165,6 @@ class DeapDataloader:
                 cache_dir=cache_dir,
                 batch_size=batch_size,
                 num_workers=num_workers,
-                validation_split=validation_split,
                 normalization=normalization,
                 train_sampling=train_sampling,
                 seed=seed,
@@ -187,7 +181,6 @@ class DeapDataloader:
         cache_dir: Path,
         batch_size: int,
         num_workers: int,
-        validation_split: float,
         normalization: str,
         train_sampling: str,
         seed: int,
@@ -230,14 +223,12 @@ class DeapDataloader:
             split,
             batch_size=batch_size,
             num_workers=num_workers,
-            validation_split=validation_split,
             seed=seed,
             normalization=normalization,
             train_sampling=train_sampling,
             dataset_factory=dataset_factory,
         )
         self.train = bundle.train
-        self.val = bundle.val
         self.test = bundle.test
 
     def _init_subject_dependent(
@@ -250,7 +241,6 @@ class DeapDataloader:
         cache_dir: Path,
         batch_size: int,
         num_workers: int,
-        validation_split: float,
         normalization: str,
         train_sampling: str,
         seed: int,
@@ -290,14 +280,12 @@ class DeapDataloader:
             split,
             batch_size=batch_size,
             num_workers=num_workers,
-            validation_split=validation_split,
             seed=seed,
             normalization=normalization,
             train_sampling=train_sampling,
             dataset_factory=dataset_factory,
         )
         self.train = bundle.train
-        self.val = bundle.val
         self.test = bundle.test
 
     # ── Convenience properties ────────────────────────────────────────────────

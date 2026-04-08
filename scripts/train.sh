@@ -35,7 +35,7 @@ Any other arguments are forwarded to the `acrnn` CLI.
 
 This script is responsible for dataset/mode/target selection and automatic
 preprocessing. It also applies a training preset automatically.
-By default it uses the stronger validation-driven training setup.
+By default it uses the standard training preset.
 With `--fast` it uses a lighter debug preset for quick smoke tests.
 
 Examples:
@@ -261,13 +261,10 @@ if [ "$USE_FAST_PRESET" -eq 1 ]; then
         --weight-decay 1e-2
         --optimizer adamw
         --scheduler plateau
-        --validation-split 0.1
         --normalization channel
         --train-sampling balanced
         --loss-class-weighting balanced
         --grad-clip 1.0
-        --threshold-min-precision 0.65
-        --threshold-min-recall 0.65
         --patience 8
         --min-epochs 10
         --log-every 5
@@ -275,20 +272,17 @@ if [ "$USE_FAST_PRESET" -eq 1 ]; then
     )
 else
     PRESET_ARGS+=(
-        --epochs 80
+        --epochs 100
         --batch-size 16
         --learning-rate 2e-4
         --weight-decay 1e-2
         --optimizer adamw
         --scheduler plateau
-        --validation-split 0.1
         --normalization channel
         --train-sampling balanced
         --loss-class-weighting balanced
         --grad-clip 1.0
-        --threshold-min-precision 0.65
-        --threshold-min-recall 0.65
-        --patience 15
+        --patience 20
         --min-epochs 20
         --log-every 10
         --num-workers 0

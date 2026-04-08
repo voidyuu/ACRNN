@@ -61,13 +61,11 @@ class EvalResult:
     metrics: EvalMetrics
     confusion_matrix: np.ndarray
     loss: float | None = None
-    decision_threshold: float = 0.5
 
 
 @dataclass(frozen=True)
 class TrainResult:
     state_dict: dict[str, torch.Tensor]
-    decision_threshold: float
     best_epoch: int
     best_score: float
 
@@ -149,7 +147,6 @@ def _build_dataloader(
     cache_dir: str | Path | None,
     batch_size: int,
     num_workers: int,
-    validation_split: float,
     normalization: str,
     train_sampling: str,
     seed: int,
@@ -161,7 +158,6 @@ def _build_dataloader(
         "threshold": threshold,
         "batch_size": batch_size,
         "num_workers": num_workers,
-        "validation_split": validation_split,
         "normalization": normalization,
         "train_sampling": train_sampling,
         "seed": seed,
@@ -284,11 +280,8 @@ def _build_class_weight_tensor(
     return class_weights.to(device)
 
 
-def _predict_from_probabilities(
-    positive_probabilities: torch.Tensor,
-    decision_threshold: float,
-) -> torch.Tensor:
-    return (positive_probabilities >= decision_threshold).to(torch.long)
+def _predict_from_probabilities(positive_probabilities: torch.Tensor) -> torch.Tensor:
+    return (positive_probabilities >= 0.5).to(torch.long)
 
 
 def _collect_probabilities(
@@ -324,53 +317,13 @@ def _collect_probabilities(
 def _result_from_probabilities(
     positive_probabilities: torch.Tensor,
     targets: torch.Tensor,
-    decision_threshold: float,
     loss: float | None = None,
 ) -> EvalResult:
-    preds = _predict_from_probabilities(positive_probabilities, decision_threshold)
+    preds = _predict_from_probabilities(positive_probabilities)
     return EvalResult(
         metrics=_compute_eval_metrics(preds, targets),
         confusion_matrix=_compute_confusion_matrix(preds, targets),
         loss=loss,
-        decision_threshold=decision_threshold,
-    )
-
-
-def _select_decision_threshold(
-    positive_probabilities: torch.Tensor,
-    targets: torch.Tensor,
-    min_precision: float,
-    min_recall: float,
-) -> EvalResult:
-    candidate_thresholds = torch.linspace(0.25, 0.75, steps=51)
-    best_result: EvalResult | None = None
-    best_score = float("-inf")
-    fallback_result: EvalResult | None = None
-    fallback_score = float("-inf")
-
-    for threshold in candidate_thresholds.tolist():
-        result = _result_from_probabilities(
-            positive_probabilities,
-            targets,
-            decision_threshold=float(threshold),
-        )
-        score = _score_metrics(result.metrics)
-        if score > fallback_score:
-            fallback_score = score
-            fallback_result = result
-
-        if (
-            result.metrics.precision >= min_precision
-            and result.metrics.recall >= min_recall
-            and score > best_score
-        ):
-            best_score = score
-            best_result = result
-
-    return best_result or fallback_result or _result_from_probabilities(
-        positive_probabilities,
-        targets,
-        decision_threshold=0.5,
     )
 
 
@@ -518,7 +471,7 @@ def _save_best_model(
     dataset: str,
     target: str,
     mode: str,
-    best_run: tuple[int | None, int, EvalMetrics, dict[str, torch.Tensor], float] | None,
+    best_run: tuple[int | None, int, EvalMetrics, dict[str, torch.Tensor]] | None,
     epochs: int,
     batch_size: int,
     threshold: float,
@@ -526,7 +479,7 @@ def _save_best_model(
     if output_dir is None or best_run is None:
         return
 
-    best_subject, best_fold, best_metrics, best_state, decision_threshold = best_run
+    best_subject, best_fold, best_metrics, best_state = best_run
     output_dir.mkdir(parents=True, exist_ok=True)
     filename = output_dir / "weight.pt"
 
@@ -545,7 +498,6 @@ def _save_best_model(
             "epochs": epochs,
             "batch_size": batch_size,
             "threshold": threshold,
-            "decision_threshold": decision_threshold,
         },
         filename,
     )
@@ -599,7 +551,6 @@ class EarlyStopping:
 def train_model(
     model: ACRNN,
     train_loader: DataLoader,
-    val_loader: DataLoader | None,
     device: torch.device,
     epochs: int = 200,
     log_every: int = 1,
@@ -610,8 +561,6 @@ def train_model(
     optimizer_name: str = "adamw",
     scheduler_name: str = "plateau",
     grad_clip_norm: float = 1.0,
-    threshold_min_precision: float = 0.65,
-    threshold_min_recall: float = 0.65,
     loss_class_weighting: str = "balanced",
 ) -> TrainResult:
     if loss_class_weighting not in {"none", "balanced"}:
@@ -648,7 +597,7 @@ def train_model(
     elif scheduler_name == "plateau":
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
-            mode="max" if val_loader is not None else "min",
+            mode="min",
             factor=0.5,
             patience=6,
             min_lr=1e-5,
@@ -660,10 +609,9 @@ def train_model(
 
     early_stopping = EarlyStopping(
         patience=patience,
-        mode="max" if val_loader is not None else "min",
+        mode="min",
     )
     best_state_dict = deepcopy(model.state_dict())
-    best_threshold = 0.5
     best_epoch = 0
 
     epoch_w = len(str(epochs))
@@ -688,47 +636,12 @@ def train_model(
             optimizer.step()
 
             epoch_loss += loss.item() * xb.size(0)
-            preds = _predict_from_probabilities(
-                torch.softmax(logits, dim=1)[:, 1],
-                decision_threshold=0.5,
-            )
+            preds = _predict_from_probabilities(torch.softmax(logits, dim=1)[:, 1])
             correct += (preds == yb).sum().item()
 
         avg_loss = epoch_loss / dataset_size
         train_acc = correct / dataset_size
-        val_result: EvalResult | None = None
-
-        if val_loader is not None:
-            val_probabilities, val_targets, val_loss = _collect_probabilities(
-                model,
-                val_loader,
-                device,
-                criterion=criterion,
-            )
-            tuned_val_result = _select_decision_threshold(
-                val_probabilities,
-                val_targets,
-                min_precision=threshold_min_precision,
-                min_recall=threshold_min_recall,
-            )
-            val_result = EvalResult(
-                metrics=tuned_val_result.metrics,
-                confusion_matrix=tuned_val_result.confusion_matrix,
-                loss=val_loss,
-                decision_threshold=tuned_val_result.decision_threshold,
-            )
-            meets_metric_floor = (
-                val_result.metrics.precision >= threshold_min_precision
-                and val_result.metrics.recall >= threshold_min_recall
-            )
-            if meets_metric_floor:
-                monitor_value = _score_metrics(val_result.metrics)
-                monitor_label = "score"
-            else:
-                monitor_value = -(val_result.loss if val_result.loss is not None else avg_loss)
-                monitor_label = "val_loss"
-        else:
-            monitor_value = avg_loss
+        monitor_value = avg_loss
 
         if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             scheduler.step(monitor_value)
@@ -738,28 +651,13 @@ def train_model(
         is_best = early_stopping.step(monitor_value)
         if is_best:
             best_state_dict = deepcopy(model.state_dict())
-            if val_result is not None:
-                best_threshold = val_result.decision_threshold
             best_epoch = epoch + 1
 
         if (epoch + 1) % log_every == 0:
             elapsed = time() - t_start
             best_mark = "  <- best" if is_best else ""
-            monitor_text = (
-                f" | Val Loss: {val_result.loss:.4f}"
-                f" | Val Acc: {val_result.metrics.accuracy * 100:5.1f}%"
-                f" | Precision: {val_result.metrics.precision * 100:5.1f}%"
-                f" | Recall: {val_result.metrics.recall * 100:5.1f}%"
-                f" | F1: {val_result.metrics.f1 * 100:5.1f}%"
-                f" | Thr: {val_result.decision_threshold:.2f}"
-                if val_result is not None and val_result.loss is not None
-                else ""
-            )
-            best_metric_text = (
-                f" | Best {monitor_label}: {early_stopping.best:.4f}"
-                if val_result is not None
-                else f" | Best Loss: {early_stopping.best:.4f}"
-            )
+            monitor_text = ""
+            best_metric_text = f" | Best Loss: {early_stopping.best:.4f}"
             print(
                 f"  Epoch {epoch + 1:{epoch_w}d}/{epochs}"
                 f" | Loss: {avg_loss:.4f}"
@@ -779,7 +677,6 @@ def train_model(
 
     return TrainResult(
         state_dict=best_state_dict,
-        decision_threshold=best_threshold,
         best_epoch=best_epoch,
         best_score=early_stopping.best,
     )
@@ -789,7 +686,6 @@ def evaluate_model(
     model: ACRNN,
     test_loader: DataLoader,
     device: torch.device,
-    decision_threshold: float = 0.5,
     criterion: nn.Module | None = None,
 ) -> EvalResult:
     positive_probabilities, targets, loss = _collect_probabilities(
@@ -801,7 +697,6 @@ def evaluate_model(
     return _result_from_probabilities(
         positive_probabilities,
         targets,
-        decision_threshold=decision_threshold,
         loss=loss,
     )
 
@@ -826,10 +721,7 @@ def cross_validate_model(
     optimizer_name: str = "adamw",
     scheduler_name: str = "plateau",
     grad_clip_norm: float = 1.0,
-    validation_split: float = 0.1,
     normalization: str = "channel",
-    threshold_min_precision: float = 0.65,
-    threshold_min_recall: float = 0.65,
     train_sampling: str = "balanced",
     loss_class_weighting: str = "balanced",
     seed: int = 42,
@@ -847,7 +739,7 @@ def cross_validate_model(
 
     all_run_metrics = _make_metric_store()
     subject_scores: dict[int, dict[str, list[float]]] = {}
-    best_run: tuple[int | None, int, EvalMetrics, dict[str, torch.Tensor], float] | None = None
+    best_run: tuple[int | None, int, EvalMetrics, dict[str, torch.Tensor]] | None = None
     overall_confusion_matrix = np.zeros((2, 2), dtype=np.int64)
 
     for run_idx, (run_subject_id, fold) in enumerate(eval_runs, start=1):
@@ -876,7 +768,6 @@ def cross_validate_model(
             cache_dir=cache_dir,
             batch_size=batch_size,
             num_workers=num_workers,
-            validation_split=validation_split,
             normalization=normalization,
             train_sampling=train_sampling,
             seed=seed + fold + (0 if run_subject_id is None else run_subject_id * 100),
@@ -884,10 +775,7 @@ def cross_validate_model(
         num_channels, num_timepoints = _infer_input_shape(dl.train)
 
         train_size = len(dl.train.dataset)  # type: ignore[arg-type]
-        val_size = len(dl.val.dataset) if dl.val is not None else 0  # type: ignore[arg-type]
         print(f"  Train samples: {train_size}")
-        if dl.val is not None:
-            print(f"  Val samples   : {val_size}")
         print(f"  Input shape : {num_channels} x {num_timepoints}")
 
         model = ACRNN(
@@ -900,7 +788,6 @@ def cross_validate_model(
         train_result = train_model(
             model,
             dl.train,
-            dl.val,
             training_device,
             epochs=epochs,
             log_every=log_every,
@@ -911,8 +798,6 @@ def cross_validate_model(
             optimizer_name=optimizer_name,
             scheduler_name=scheduler_name,
             grad_clip_norm=grad_clip_norm,
-            threshold_min_precision=threshold_min_precision,
-            threshold_min_recall=threshold_min_recall,
             loss_class_weighting=loss_class_weighting,
         )
         model.load_state_dict(train_result.state_dict)
@@ -923,13 +808,11 @@ def cross_validate_model(
             model,
             dl.test,
             training_device,
-            decision_threshold=train_result.decision_threshold,
         )
         metrics = eval_result.metrics
 
         print(f"\n  Test samples : {test_size}")
         print(f"  Best epoch   : {train_result.best_epoch}")
-        print(f"  Decision thr : {train_result.decision_threshold:.2f}")
         print(f"  Accuracy     : {metrics.accuracy * 100:.2f}%")
         print(f"  Precision    : {metrics.precision * 100:.2f}%")
         print(f"  Recall       : {metrics.recall * 100:.2f}%")
@@ -950,7 +833,6 @@ def cross_validate_model(
                 fold,
                 metrics,
                 train_result.state_dict,
-                train_result.decision_threshold,
             )
 
     if subject_scores and (mode == "subject_independent" or subject_id is None):

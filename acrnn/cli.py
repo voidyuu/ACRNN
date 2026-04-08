@@ -133,28 +133,10 @@ def parse_args() -> argparse.Namespace:
         help="Gradient clipping norm; 0 disables clipping (default: 1.0)",
     )
     parser.add_argument(
-        "--validation-split",
-        type=float,
-        default=0.1,
-        help="Fraction of the training fold held out for validation and threshold tuning (default: 0.1)",
-    )
-    parser.add_argument(
         "--normalization",
         choices=["none", "channel"],
         default="channel",
         help="Input normalization strategy (default: channel)",
-    )
-    parser.add_argument(
-        "--threshold-min-precision",
-        type=float,
-        default=0.65,
-        help="Minimum validation precision when scanning decision thresholds (default: 0.65)",
-    )
-    parser.add_argument(
-        "--threshold-min-recall",
-        type=float,
-        default=0.65,
-        help="Minimum validation recall when scanning decision thresholds (default: 0.65)",
     )
     parser.add_argument(
         "--train-sampling",
@@ -172,7 +154,7 @@ def parse_args() -> argparse.Namespace:
         "--seed",
         type=int,
         default=42,
-        help="Random seed for validation splits (default: 42)",
+        help="Random seed for fold generation and training shuffles (default: 42)",
     )
     parser.add_argument(
         "--save-dir",
@@ -208,9 +190,7 @@ def main() -> None:
     print(f"Optim     : {args.optimizer}")
     print(f"Sched     : {args.scheduler}")
     print(f"Grad clip : {args.grad_clip}")
-    print(f"Val split : {args.validation_split}")
     print(f"Norm      : {args.normalization}")
-    print(f"Thr floor : prec>={args.threshold_min_precision}, rec>={args.threshold_min_recall}")
     print(f"Sampling  : {args.train_sampling}")
     print(f"Loss wts  : {args.loss_class_weighting}")
     print(f"Seed      : {args.seed}")
@@ -237,10 +217,7 @@ def main() -> None:
         optimizer_name=args.optimizer,
         scheduler_name=args.scheduler,
         grad_clip_norm=args.grad_clip,
-        validation_split=args.validation_split,
         normalization=args.normalization,
-        threshold_min_precision=args.threshold_min_precision,
-        threshold_min_recall=args.threshold_min_recall,
         train_sampling=args.train_sampling,
         loss_class_weighting=args.loss_class_weighting,
         seed=args.seed,
