@@ -86,14 +86,11 @@ exit "$status"'
         "$BARK_URL"
         "$@"
     )
-    local quoted_cmd
-    quoted_cmd=$(printf '%q ' "${cmd[@]}")
-
     if [ "$session_exists" -eq 0 ]; then
-        tmux new-session -d -s "$SESSION_NAME" -n "$window_name" "$quoted_cmd"
+        tmux new-session -d -s "$SESSION_NAME" -n "$window_name" "${cmd[@]}"
         session_exists=1
     else
-        tmux new-window -t "$SESSION_NAME:" -n "$window_name" "$quoted_cmd"
+        tmux new-window -t "$SESSION_NAME:" -n "$window_name" "${cmd[@]}"
     fi
 
     created_windows=$((created_windows + 1))
