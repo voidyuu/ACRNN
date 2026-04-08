@@ -45,41 +45,6 @@ def build_kfold_splits(
     labels: np.ndarray | None = None,
     stratified: bool = False,
 ) -> list[DataSplit]:
-    """Build *k* :class:`DataSplit` objects for k-fold cross-validation.
-
-    The dataset is partitioned into *k* roughly equal folds.  Each returned
-    :class:`DataSplit` holds out one fold as the test set and uses the
-    remaining *k-1* folds for training.
-
-    Parameters
-    ----------
-    num_examples:
-        Total number of examples in the dataset.
-    k:
-        Number of folds (default: 10).
-    shuffle:
-        Whether to shuffle the indices before partitioning (default: ``True``).
-    seed:
-        Random seed used for shuffling; ignored when *shuffle* is ``False``
-        (default: 42).
-
-    Returns
-    -------
-    list[DataSplit]
-        A list of *k* :class:`DataSplit` objects.  The *i*-th element
-        corresponds to using fold *i* as the test set.
-
-    Example
-    -------
-    >>> splits = build_kfold_splits(1000, k=5)
-    >>> for fold, split in enumerate(splits):
-    ...     print(fold, len(split.train_idx), len(split.test_idx))
-    0 800 200
-    1 800 200
-    2 800 200
-    3 800 200
-    4 800 200
-    """
     if k < 2:
         raise ValueError(f"k must be at least 2, got {k}")
     if num_examples < k:
