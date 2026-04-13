@@ -33,10 +33,10 @@ Script options:
 
 Any other arguments are forwarded to the `acrnn` CLI.
 
-This script is responsible for dataset/mode/target selection and automatic
-preprocessing. It also applies a training preset automatically.
-By default it uses the standard training preset.
-With `--fast` it uses a lighter debug preset for quick smoke tests.
+This script is responsible for dataset/mode/target selection, automatic
+preprocessing and forwarding training arguments to the `acrnn` CLI.
+With `--fast` it applies a lighter debug preset for quick smoke tests.
+Standard dataset-specific defaults should be provided by wrapper scripts.
 
 Examples:
   scripts/train.sh --dataset dreamer --mode all --target all
@@ -221,8 +221,6 @@ expand_targets_for_dataset() {
 }
 
 build_preset_args() {
-    local dataset="$1"
-
     PRESET_ARGS=()
 
     if [ "$USE_FAST_PRESET" -eq 1 ]; then
@@ -242,51 +240,7 @@ build_preset_args() {
             --log-every 5
             --num-workers 0
         )
-        return
     fi
-
-    case "$dataset" in
-        dreamer)
-            PRESET_ARGS+=(
-                --epochs 100
-                --batch-size 16
-                --learning-rate 2e-4
-                --weight-decay 1e-2
-                --optimizer adamw
-                --scheduler plateau
-                --normalization channel
-                --train-sampling balanced
-                --loss-class-weighting balanced
-                --grad-clip 1.0
-                --patience 20
-                --min-epochs 20
-                --log-every 10
-                --num-workers 0
-            )
-            ;;
-        deap)
-            PRESET_ARGS+=(
-                --epochs 50
-                --batch-size 16
-                --learning-rate 2e-4
-                --weight-decay 1e-2
-                --optimizer adamw
-                --scheduler plateau
-                --normalization channel
-                --train-sampling shuffle
-                --loss-class-weighting balanced
-                --grad-clip 1.0
-                --patience 15
-                --min-epochs 20
-                --log-every 10
-                --num-workers 0
-            )
-            ;;
-        *)
-            echo "Unsupported dataset for preset selection: $dataset" >&2
-            exit 1
-            ;;
-    esac
 }
 
 while [ "$#" -gt 0 ]; do
@@ -336,7 +290,7 @@ read_lines_into_array DATASETS expand_datasets
 read_lines_into_array MODES expand_modes
 
 for dataset in "${DATASETS[@]}"; do
-    build_preset_args "$dataset"
+    build_preset_args
     cache_dir="$(resolve_cache_dir "$dataset")"
     ensure_cache_ready "$dataset" "$cache_dir"
 

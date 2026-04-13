@@ -19,10 +19,58 @@ fi
 
 created_windows=0
 
+standard_args_for_dataset() {
+    local dataset="$1"
+
+    case "$dataset" in
+        deap)
+            printf '%s\n' \
+                --epochs 50 \
+                --batch-size 16 \
+                --learning-rate 2e-4 \
+                --weight-decay 1e-2 \
+                --optimizer adamw \
+                --scheduler plateau \
+                --normalization channel \
+                --train-sampling shuffle \
+                --loss-class-weighting balanced \
+                --grad-clip 1.0 \
+                --patience 15 \
+                --min-epochs 20 \
+                --log-every 10 \
+                --num-workers 0
+            ;;
+        dreamer)
+            printf '%s\n' \
+                --epochs 100 \
+                --batch-size 16 \
+                --learning-rate 2e-4 \
+                --weight-decay 1e-2 \
+                --optimizer adamw \
+                --scheduler plateau \
+                --normalization channel \
+                --train-sampling shuffle \
+                --loss-class-weighting balanced \
+                --grad-clip 1.0 \
+                --patience 20 \
+                --min-epochs 20 \
+                --log-every 10 \
+                --num-workers 0
+            ;;
+        *)
+            echo "Unsupported dataset: $dataset" >&2
+            exit 1
+            ;;
+    esac
+}
+
 launch_target() {
     local dataset="$1"
     local target="$2"
     shift 2
+    local standard_args=()
+
+    mapfile -t standard_args < <(standard_args_for_dataset "$dataset")
 
     local window_name="${dataset}-${target}"
     local cmd=(
@@ -84,6 +132,7 @@ exit "$status"'
         "$dataset"
         "$target"
         "$BARK_URL"
+        "${standard_args[@]}"
         "$@"
     )
     if [ "$session_exists" -eq 0 ]; then
