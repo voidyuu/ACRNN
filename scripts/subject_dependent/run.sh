@@ -19,43 +19,24 @@ fi
 
 created_windows=0
 
+. "$SCRIPT_DIR/deap_run.sh"
+. "$SCRIPT_DIR/dreamer_run.sh"
+
 standard_args_for_dataset() {
     local dataset="$1"
+    local out_var="$2"
+
+    if ! [[ "$out_var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        echo "Invalid output variable name: $out_var" >&2
+        exit 1
+    fi
 
     case "$dataset" in
         deap)
-            printf '%s\n' \
-                --epochs 50 \
-                --batch-size 16 \
-                --learning-rate 2e-4 \
-                --weight-decay 1e-2 \
-                --optimizer adamw \
-                --scheduler plateau \
-                --normalization channel \
-                --train-sampling shuffle \
-                --loss-class-weighting balanced \
-                --grad-clip 1.0 \
-                --patience 15 \
-                --min-epochs 20 \
-                --log-every 10 \
-                --num-workers 0
+            eval "$out_var=(\"\${DEAP_RUN_ARGS[@]}\")"
             ;;
         dreamer)
-            printf '%s\n' \
-                --epochs 100 \
-                --batch-size 16 \
-                --learning-rate 2e-4 \
-                --weight-decay 1e-2 \
-                --optimizer adamw \
-                --scheduler plateau \
-                --normalization channel \
-                --train-sampling shuffle \
-                --loss-class-weighting balanced \
-                --grad-clip 1.0 \
-                --patience 20 \
-                --min-epochs 20 \
-                --log-every 10 \
-                --num-workers 0
+            eval "$out_var=(\"\${DREAMER_RUN_ARGS[@]}\")"
             ;;
         *)
             echo "Unsupported dataset: $dataset" >&2
@@ -70,7 +51,7 @@ launch_target() {
     shift 2
     local standard_args=()
 
-    mapfile -t standard_args < <(standard_args_for_dataset "$dataset")
+    standard_args_for_dataset "$dataset" standard_args
 
     local window_name="${dataset}-${target}"
     local cmd=(
