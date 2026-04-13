@@ -401,6 +401,7 @@ def _save_metrics(
     dataset: str,
     target: str,
     mode: str,
+    training_config: dict[str, object],
     overall_metrics: dict[str, dict[str, float]],
     subject_metrics: dict[int, dict[str, dict[str, float]]],
     confusion_matrix: np.ndarray,
@@ -414,6 +415,7 @@ def _save_metrics(
         "dataset": dataset,
         "target": target,
         "mode": mode,
+        "training_config": training_config,
         "overall_metrics": overall_metrics,
         "subject_metrics": {
             str(subject_id): metrics for subject_id, metrics in sorted(subject_metrics.items())
@@ -472,9 +474,7 @@ def _save_best_model(
     target: str,
     mode: str,
     best_run: tuple[int | None, int, EvalMetrics, dict[str, torch.Tensor]] | None,
-    epochs: int,
-    batch_size: int,
-    threshold: float,
+    training_config: dict[str, object],
 ) -> None:
     if output_dir is None or best_run is None:
         return
@@ -495,9 +495,10 @@ def _save_best_model(
             "test_precision": best_metrics.precision,
             "test_recall": best_metrics.recall,
             "test_f1": best_metrics.f1,
-            "epochs": epochs,
-            "batch_size": batch_size,
-            "threshold": threshold,
+            "epochs": training_config["epochs"],
+            "batch_size": training_config["batch_size"],
+            "threshold": training_config["threshold"],
+            "training_config": training_config,
         },
         filename,
     )
@@ -850,6 +851,24 @@ def cross_validate_model(
             )
 
     overall_metrics = _summarise_metric_store(all_run_metrics)
+    training_config = {
+        "threshold": threshold,
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "log_every": log_every,
+        "patience": patience,
+        "min_epochs": min_epochs,
+        "learning_rate": learning_rate,
+        "weight_decay": weight_decay,
+        "optimizer_name": optimizer_name,
+        "scheduler_name": scheduler_name,
+        "grad_clip_norm": grad_clip_norm,
+        "normalization": normalization,
+        "train_sampling": train_sampling,
+        "loss_class_weighting": loss_class_weighting,
+        "seed": seed,
+    }
     timestamp_label = make_timestamp_label()
     output_dir = (
         None
@@ -886,6 +905,7 @@ def cross_validate_model(
         dataset=dataset,
         target=target,
         mode=mode,
+        training_config=training_config,
         overall_metrics=overall_metrics,
         subject_metrics={
             subject_id: _summarise_metric_store(metric_store)
@@ -907,9 +927,7 @@ def cross_validate_model(
         target=target,
         mode=mode,
         best_run=best_run,
-        epochs=epochs,
-        batch_size=batch_size,
-        threshold=threshold,
+        training_config=training_config,
     )
 
     return overall_metrics["accuracy"]["mean"], overall_metrics["accuracy"]["std"]

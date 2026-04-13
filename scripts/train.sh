@@ -220,6 +220,75 @@ expand_targets_for_dataset() {
     printf '%s\n' "${expanded[@]}" | awk '!seen[$0]++'
 }
 
+build_preset_args() {
+    local dataset="$1"
+
+    PRESET_ARGS=()
+
+    if [ "$USE_FAST_PRESET" -eq 1 ]; then
+        PRESET_ARGS+=(
+            --epochs 25
+            --batch-size 16
+            --learning-rate 2e-4
+            --weight-decay 1e-2
+            --optimizer adamw
+            --scheduler plateau
+            --normalization channel
+            --train-sampling balanced
+            --loss-class-weighting balanced
+            --grad-clip 1.0
+            --patience 8
+            --min-epochs 10
+            --log-every 5
+            --num-workers 0
+        )
+        return
+    fi
+
+    case "$dataset" in
+        dreamer)
+            PRESET_ARGS+=(
+                --epochs 100
+                --batch-size 16
+                --learning-rate 2e-4
+                --weight-decay 1e-2
+                --optimizer adamw
+                --scheduler plateau
+                --normalization channel
+                --train-sampling balanced
+                --loss-class-weighting balanced
+                --grad-clip 1.0
+                --patience 20
+                --min-epochs 20
+                --log-every 10
+                --num-workers 0
+            )
+            ;;
+        deap)
+            PRESET_ARGS+=(
+                --epochs 50
+                --batch-size 16
+                --learning-rate 2e-4
+                --weight-decay 1e-2
+                --optimizer adamw
+                --scheduler plateau
+                --normalization channel
+                --train-sampling shuffle
+                --loss-class-weighting balanced
+                --grad-clip 1.0
+                --patience 15
+                --min-epochs 20
+                --log-every 10
+                --num-workers 0
+            )
+            ;;
+        *)
+            echo "Unsupported dataset for preset selection: $dataset" >&2
+            exit 1
+            ;;
+    esac
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --dataset|--datasets)
@@ -253,42 +322,6 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-if [ "$USE_FAST_PRESET" -eq 1 ]; then
-    PRESET_ARGS+=(
-        --epochs 25
-        --batch-size 16
-        --learning-rate 2e-4
-        --weight-decay 1e-2
-        --optimizer adamw
-        --scheduler plateau
-        --normalization channel
-        --train-sampling balanced
-        --loss-class-weighting balanced
-        --grad-clip 1.0
-        --patience 8
-        --min-epochs 10
-        --log-every 5
-        --num-workers 0
-    )
-else
-    PRESET_ARGS+=(
-        --epochs 50
-        --batch-size 16
-        --learning-rate 2e-4
-        --weight-decay 1e-2
-        --optimizer adamw
-        --scheduler plateau
-        --normalization channel
-        --train-sampling shuffle
-        --loss-class-weighting balanced
-        --grad-clip 1.0
-        --patience 15
-        --min-epochs 20
-        --log-every 10
-        --num-workers 0
-    )
-fi
-
 if [ -n "$CACHE_DIR_OVERRIDE" ]; then
     read_lines_into_array _datasets_for_cache_check expand_datasets
     if [ "${#_datasets_for_cache_check[@]}" -ne 1 ]; then
@@ -303,6 +336,7 @@ read_lines_into_array DATASETS expand_datasets
 read_lines_into_array MODES expand_modes
 
 for dataset in "${DATASETS[@]}"; do
+    build_preset_args "$dataset"
     cache_dir="$(resolve_cache_dir "$dataset")"
     ensure_cache_ready "$dataset" "$cache_dir"
 
